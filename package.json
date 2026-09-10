@@ -1,0 +1,11 @@
+{
+  "name": "appayo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Comptador de punts per al Papayoo",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "python3 -m http.server 4173"
+  }
+}
