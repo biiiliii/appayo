@@ -10,6 +10,8 @@ instal·lable a la pantalla d'inici i que funciona sense connexió.
 3. Posa els punts de cada jugador amb els botons (−10, −5, −, +, +5, +10) o escrivint al camp.
 4. L'últim jugador que quedi sense punts rep **la resta fins a 250** automàticament.
 5. Desa la ronda. Guanya qui té menys punts.
+6. Durant la partida hi ha la classificació, una gràfica de l'evolució dels punts i la taula ronda a ronda.
+7. Les partides acabades queden a "Partides anteriors" (al mateix mòbil), amb classificació, gràfica i taula.
 
 Regles que aplica l'app: total de 250 punts per ronda, cap valor negatiu, qui té el
 Papayoo té com a mínim 40 punts, i la resta com a màxim 210.
@@ -26,8 +28,9 @@ npm test         # proves de la lògica (node --test)
 Fitxers:
 
 - `logic.js` — lògica pura de puntuació (provada a `test/`).
-- `app.js` — interfície i desat a `localStorage`.
-- `index.html`, `styles.css`, `manifest.webmanifest`, `sw.js`, `icons/` — la PWA.
+- `app.js` — interfície i desat a `localStorage` (partida en curs i historial de partides).
+- `chart.js` — gràfica SVG de punts acumulats (sense dependències).
+- `index.html`, `styles.css`, `fonts/` (Bricolage Grotesque, llicència OFL), `manifest.webmanifest`, `sw.js`, `icons/` — la PWA.
 
 ## Publicar
 

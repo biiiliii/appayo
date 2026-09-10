@@ -2,6 +2,7 @@ import {
   TOTAL, PAPAYOO_POINTS, MIN_PLAYERS, MAX_PLAYERS,
   resolveRound, clampPoints, maxPointsFor, standings, validateSetup, createGame,
 } from './logic.js';
+import { renderChart, seriesColor } from './chart.js';
 
 const STORAGE_KEY = 'appayo:v1';
 const root = document.getElementById('app');
@@ -19,12 +20,14 @@ const ERROR_TEXT = {
 };
 
 // ---------- Estat ----------
-const state = load() ?? {
+const state = Object.assign({
   screen: 'setup',
   setup: { names: ['', '', '', ''], roundsPlanned: 5 },
   game: null,
   draft: null,
-};
+  games: [],      // partides acabades, la més recent primer
+  viewing: null,  // id de la partida de l'historial que s'està mirant
+}, load() ?? {});
 
 function load() {
   try {
@@ -43,6 +46,16 @@ function setState(fn) {
   save();
   render();
 }
+function archiveCurrentGame(st) {
+  const g = st.game;
+  if (g && g.rounds.length) {
+    st.games.unshift({ ...g, id: `${g.createdAt}-${Math.random().toString(36).slice(2, 7)}`, endedAt: Date.now() });
+    st.games = st.games.slice(0, 100);
+  }
+  if (g) { st.setup.names = g.players.slice(); st.setup.roundsPlanned = g.roundsPlanned; }
+  st.game = null;
+  st.draft = null;
+}
 
 // ---------- Utilitats DOM ----------
 function h(tag, attrs, ...children) {
@@ -51,8 +64,8 @@ function h(tag, attrs, ...children) {
   for (const [k, v] of Object.entries(attrs)) {
     if (v === null || v === undefined || v === false) continue;
     if (k === 'class') el.className = v;
+    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (k === 'dataset') Object.assign(el.dataset, v);
     else if (k in el && k !== 'type' && k !== 'value' && typeof v !== 'string') el[k] = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
@@ -62,11 +75,16 @@ function h(tag, attrs, ...children) {
   }
   return el;
 }
+const dot = (i) => h('i', { class: 'dot', style: { background: seriesColor(i) } });
+const pcard = (lg) => h('span', { class: `pcard${lg ? ' lg' : ''}`, 'aria-label': 'Papayoo' }, '7');
+const fmtDate = (ts) => new Date(ts).toLocaleDateString('ca', { day: 'numeric', month: 'long', year: 'numeric' });
 
 function render() {
   const active = document.activeElement;
   const focusId = active && active.id ? active.id : null;
-  root.replaceChildren(state.screen === 'game' && state.game ? renderGame() : renderSetup());
+  const screens = { setup: renderSetup, game: renderGame, history: renderHistory, detail: renderDetail };
+  const fn = (state.screen === 'game' && !state.game) ? renderSetup : (screens[state.screen] || renderSetup);
+  root.replaceChildren(fn());
   if (focusId) {
     const el = document.getElementById(focusId);
     if (el) {
@@ -78,113 +96,123 @@ function render() {
     }
   }
 }
+function go(screen, extra) {
+  setState(st => { st.screen = screen; Object.assign(st, extra || {}); });
+  window.scrollTo(0, 0);
+}
 
-function header(subtitle) {
-  return h('header', { class: 'header' },
-    h('div', { class: 'brand' },
-      h('img', { src: 'icons/icon.svg', alt: '' }),
-      h('div', null, h('h1', null, 'Appayo'), h('small', null, subtitle)),
-    ),
+function masthead(context) {
+  return h('header', { class: 'masthead' },
+    h('h1', { class: 'wordmark' }, h('button', { type: 'button', onclick: () => go(state.game ? 'game' : 'setup') }, 'Appayo')),
+    h('div', { class: 'context' }, context),
+  );
+}
+function section(title, sub, ...children) {
+  return h('section', { class: 'section' },
+    h('h2', { class: 'section-title' }, title, sub ? h('small', null, sub) : null),
+    ...children,
   );
 }
 
-// ---------- Pantalla d'inici ----------
+// ---------- Inici ----------
 function renderSetup() {
   const s = state.setup;
-  const errorBox = h('p', { class: 'error-text', id: 'setup-error', hidden: true });
+  const errorBox = h('p', { class: 'error', hidden: true });
 
-  const nameRows = s.names.map((name, i) => h('div', { class: 'field' },
-    h('span', { class: 'num' }, i + 1),
+  const roster = h('ul', { class: 'roster' }, s.names.map((name, i) => h('li', null,
+    dot(i),
     h('input', {
-      class: 'text-input', type: 'text', id: `name-${i}`, value: name,
+      class: 'text', type: 'text', id: `name-${i}`, value: name,
       placeholder: `Jugador ${i + 1}`, autocomplete: 'off', autocapitalize: 'words', maxlength: 20,
+      enterkeyhint: 'next',
       oninput: (e) => { s.names[i] = e.target.value; save(); },
+      onkeydown: (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const next = document.getElementById(`name-${i + 1}`);
+        if (next) next.focus(); else e.target.blur();
+      },
     }),
     h('button', {
-      class: 'icon-btn', type: 'button', 'aria-label': 'Treu aquest jugador',
+      class: 'remove', type: 'button', 'aria-label': `Treu el jugador ${i + 1}`,
       disabled: s.names.length <= MIN_PLAYERS,
       onclick: () => setState(st => { st.setup.names.splice(i, 1); }),
     }, '×'),
-  ));
+  )));
 
   const roundOptions = [3, 4, 5, 6, 8, 10, null];
-  const segmented = h('div', { class: 'segmented' },
-    roundOptions.map(n => h('button', {
-      class: 'seg', type: 'button', 'aria-pressed': String(s.roundsPlanned === n),
-      onclick: () => setState(st => { st.setup.roundsPlanned = n; }),
-    }, n === null ? 'Sense límit' : n)),
-  );
+  const rounds = h('div', { class: 'choices' }, roundOptions.map(n => h('button', {
+    class: 'choice', type: 'button', 'aria-pressed': String(s.roundsPlanned === n),
+    onclick: () => setState(st => { st.setup.roundsPlanned = n; }),
+  }, n === null ? 'Sense límit' : n)));
 
-  const resume = state.game ? h('section', { class: 'card' },
-    h('h2', null, 'Partida en curs'),
-    h('p', { style: 'margin:0 0 12px' },
-      `${state.game.players.join(', ')} · ${state.game.rounds.length} ${state.game.rounds.length === 1 ? 'ronda jugada' : 'rondes jugades'}`),
-    h('button', { class: 'btn block', type: 'button', onclick: () => setState(st => { st.screen = 'game'; }) }, 'Continuar la partida'),
+  const resume = state.game ? section('Partida en curs', null,
+    h('p', { class: 'lede' }, `${state.game.players.join(', ')}. ${state.game.rounds.length === 1 ? 'Una ronda jugada' : `${state.game.rounds.length} rondes jugades`}.`),
+    h('button', { class: 'btn block', type: 'button', onclick: () => go('game') }, 'Continua la partida'),
   ) : null;
 
   return h('div', null,
-    header('Comptador de punts del Papayoo'),
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('history') },
+      state.games.length ? `Partides anteriors (${state.games.length})` : 'Partides anteriors')),
     resume,
-    h('section', { class: 'card' },
-      h('h2', null, 'Jugadors'),
-      h('div', { class: 'stack' }, nameRows),
-      h('div', { class: 'row spread', style: 'margin-top:12px' },
-        h('p', { class: 'hint', style: 'margin:0' }, `De ${MIN_PLAYERS} a ${MAX_PLAYERS} jugadors`),
+    section('Qui juga?', `de ${MIN_PLAYERS} a ${MAX_PLAYERS}`,
+      roster,
+      h('div', { class: 'actions end' },
         h('button', {
-          class: 'btn secondary small', type: 'button', disabled: s.names.length >= MAX_PLAYERS,
+          class: 'btn outline small', type: 'button', disabled: s.names.length >= MAX_PLAYERS,
           onclick: () => setState(st => { st.setup.names.push(''); }),
-        }, '+ Afegeix jugador'),
+        }, 'Afegeix un jugador'),
       ),
     ),
-    h('section', { class: 'card' },
-      h('h2', null, 'Rondes'),
-      segmented,
-      h('p', { class: 'hint' }, 'Les normes recomanen 5 rondes. Sempre podreu afegir-ne més al final.'),
+    section('Quantes rondes?', null,
+      rounds,
+      h('p', { class: 'note' }, 'Les normes en recomanen 5. En acabar sempre en podreu afegir més.'),
     ),
-    errorBox,
-    h('button', {
-      class: 'btn block', type: 'button', style: 'margin-top:4px',
-      onclick: () => {
-        const errors = validateSetup(s.names);
-        if (errors.length) {
-          errorBox.textContent = ERROR_TEXT[errors[0]];
-          errorBox.hidden = false;
-          return;
-        }
-        if (state.game && state.game.rounds.length && !confirm('Hi ha una partida en curs. Vols començar-ne una de nova i perdre-la?')) return;
-        setState(st => {
-          st.game = createGame(s.names, s.roundsPlanned);
-          st.draft = emptyDraft(st.game.players.length);
-          st.screen = 'game';
-        });
-        window.scrollTo(0, 0);
-      },
-    }, 'Comença la partida'),
+    h('section', { class: 'section' },
+      errorBox,
+      h('button', {
+        class: 'btn block', type: 'button',
+        onclick: () => {
+          const errors = validateSetup(s.names);
+          if (errors.length) { errorBox.textContent = ERROR_TEXT[errors[0]]; errorBox.hidden = false; return; }
+          if (state.game && state.game.rounds.length
+              && !confirm('Hi ha una partida en curs. Es desarà a l\'historial i en començarà una de nova.')) return;
+          setState(st => {
+            if (st.game) archiveCurrentGame(st);
+            st.game = createGame(s.names, s.roundsPlanned);
+            st.draft = emptyDraft(st.game.players.length);
+            st.screen = 'game';
+          });
+          window.scrollTo(0, 0);
+        },
+      }, state.game ? 'Comença una altra partida' : 'Comença la partida'),
+    ),
   );
 }
 
-// ---------- Pantalla de partida ----------
+// ---------- Partida ----------
 function renderGame() {
   const g = state.game;
   const n = g.players.length;
   if (!state.draft || state.draft.points.length !== n) state.draft = emptyDraft(n);
   const roundNo = g.rounds.length + 1;
   const finished = g.roundsPlanned !== null && g.rounds.length >= g.roundsPlanned;
-  const subtitle = g.roundsPlanned ? `Ronda ${Math.min(roundNo, g.roundsPlanned)} de ${g.roundsPlanned}` : `Ronda ${roundNo}`;
+  const context = finished
+    ? 'Partida acabada'
+    : g.roundsPlanned ? h('span', null, 'Ronda ', h('b', null, roundNo), ` de ${g.roundsPlanned}`) : h('span', null, 'Ronda ', h('b', null, roundNo));
 
   return h('div', null,
-    header(finished ? 'Partida acabada' : subtitle),
-    finished ? renderFinished(g) : null,
-    renderStandings(g),
+    masthead(context),
+    finished ? renderWinner(g) : null,
+    renderStandings(g, finished),
     finished ? null : renderRoundEntry(g),
-    renderHistory(g),
-    h('div', { class: 'footer-actions' },
-      finished ? h('button', {
-        class: 'btn secondary', type: 'button',
-        onclick: () => setState(st => { st.game.roundsPlanned += 1; }),
-      }, '+ Juga una ronda més') : null,
+    g.rounds.length >= 1 ? section('Com ha anat', 'acumulat, menys és millor', renderChart(g.players, g.rounds), legend(g.players)) : null,
+    g.rounds.length ? section('Ronda a ronda', null, renderRoundsTable(g)) : null,
+    h('div', { class: 'actions center' },
+      finished ? h('button', { class: 'btn outline', type: 'button', onclick: () => setState(st => { st.game.roundsPlanned += 1; }) }, 'Juga una ronda més') : null,
+      finished ? h('button', { class: 'btn', type: 'button', onclick: () => { setState(archiveCurrentGame); go('setup'); } }, 'Desa la partida a l\'historial') : null,
       g.rounds.length ? h('button', {
-        class: 'btn ghost', type: 'button',
+        class: 'btn quiet', type: 'button',
         onclick: () => {
           if (!confirm(`Vols desfer la ronda ${g.rounds.length}? Els seus punts tornaran al formulari.`)) return;
           setState(st => {
@@ -192,48 +220,39 @@ function renderGame() {
             st.draft = { papayoo: last.papayoo, points: last.points.slice() };
           });
         },
-      }, '↩ Desfés l\'última ronda') : null,
-      h('button', {
-        class: 'btn ghost', type: 'button',
+      }, 'Desfés l\'última ronda') : null,
+      finished ? null : h('button', {
+        class: 'btn quiet', type: 'button',
         onclick: () => {
-          if (g.rounds.length && !confirm('Vols acabar aquesta partida i començar-ne una de nova?')) return;
-          setState(st => {
-            st.setup.names = st.game.players.slice();
-            st.setup.roundsPlanned = st.game.roundsPlanned;
-            st.game = null;
-            st.draft = null;
-            st.screen = 'setup';
-          });
-          window.scrollTo(0, 0);
+          if (g.rounds.length && !confirm('Vols acabar aquí? La partida es desarà a l\'historial tal com està.')) return;
+          setState(archiveCurrentGame);
+          go('setup');
         },
-      }, 'Partida nova'),
+      }, g.rounds.length ? 'Acaba la partida' : 'Cancel·la la partida'),
     ),
   );
 }
 
-function renderFinished(g) {
+function renderWinner(g) {
   const rows = standings(g.players, g.rounds);
   const winners = rows.filter(r => r.rank === 1).map(r => r.name);
-  return h('section', { class: 'banner' },
-    h('div', { class: 'big' }, '🏆'),
-    h('strong', null, winners.length > 1 ? `Empat: ${winners.join(' i ')}` : `Guanya ${winners[0]}!`),
-    h('p', null, `${rows[0].total} punts després de ${g.rounds.length} rondes`),
+  const runnerUp = rows.find(r => r.rank > 1);
+  return h('section', { class: 'winner' },
+    h('p', { class: 'lead' }, winners.length > 1 ? 'Empat al capdavant' : `Després de ${g.rounds.length} rondes, guanya`),
+    h('p', { class: 'name' }, winners.join(' i ')),
+    h('p', { class: 'sub' }, `${rows[0].total} punts`, runnerUp ? `, ${runnerUp.total - rows[0].total} menys que ${runnerUp.name}.` : '.'),
   );
 }
 
-function renderStandings(g) {
+function renderStandings(g, finished) {
   const rows = standings(g.players, g.rounds);
   const last = g.rounds[g.rounds.length - 1];
-  return h('section', { class: 'card' },
-    h('h2', null, 'Classificació ', h('span', { class: 'hint', style: 'text-transform:none;letter-spacing:0;font-weight:500' }, '(menys punts guanya)')),
-    h('ol', { class: 'standings' },
-      rows.map(r => h('li', { class: r.rank === 1 && g.rounds.length ? 'leader' : null },
-        h('span', { class: 'rank' }, r.rank),
-        h('span', { class: 'name' }, r.name),
-        h('span', { class: 'total' }, r.total,
-          last ? h('span', { class: 'delta' }, `+${last.points[r.index]}`) : null),
-      )),
-    ),
+  return section(finished ? 'Classificació final' : 'Classificació', g.rounds.length ? 'menys punts guanya' : null,
+    h('ol', { class: 'ledger' }, rows.map(r => h('li', { class: r.rank === 1 && g.rounds.length ? 'first' : null },
+      h('span', { class: 'pos' }, g.rounds.length ? `${r.rank}.` : ''),
+      h('span', { class: 'who' }, dot(r.index), h('span', null, r.name), last && last.papayoo === r.index ? pcard() : null),
+      h('span', { class: 'score' }, r.total, last ? h('span', { class: 'last' }, `+${last.points[r.index]}`) : null),
+    ))),
   );
 }
 
@@ -255,43 +274,38 @@ function renderRoundEntry(g) {
     setPoints(i, clampPoints(base + delta, isPap));
   };
 
-  const chips = h('div', { class: 'chips' },
+  const holder = h('div', { class: 'holder', role: 'group', 'aria-label': 'Qui té el Papayoo' },
     g.players.map((name, i) => h('button', {
-      class: 'chip', type: 'button', 'aria-pressed': String(d.papayoo === i),
+      type: 'button', 'aria-pressed': String(d.papayoo === i),
       onclick: () => setState(st => {
         st.draft.papayoo = i;
         if (st.draft.points[i] !== null && st.draft.points[i] < PAPAYOO_POINTS) st.draft.points[i] = PAPAYOO_POINTS;
       }),
-    }, name)),
+    }, pcard(), name)),
   );
 
-  const playerRows = g.players.map((name, i) => {
+  const rows = g.players.map((name, i) => {
     const isPap = d.papayoo === i;
     const isAuto = res.auto === i;
     const value = displayValue(i);
-    const inputId = `points-${i}`;
-    return h('div', { class: 'player-row' },
-      h('div', { class: 'top' },
-        h('span', { class: 'pname' }, name),
-        isPap ? h('span', { class: 'pill papayoo' }, 'Papayoo +40') : null,
-        isAuto ? h('span', { class: `pill auto${autoBad ? ' bad' : ''}` }, 'la resta') : null,
-        d.points[i] !== null ? h('button', {
-          class: 'clear-btn', type: 'button', 'aria-label': `Esborra els punts de ${name}`,
-          onclick: () => setPoints(i, null),
-        }, '✕') : null,
+    const min = isPap ? PAPAYOO_POINTS : 0;
+    const max = maxPointsFor(isPap);
+    return h('li', null,
+      h('div', { class: 'who' },
+        dot(i),
+        h('span', { class: 'name' }, name),
+        isPap ? pcard() : null,
+        isAuto ? h('span', { class: `tag rest${autoBad ? ' bad' : ''}` }, 'la resta') : null,
+        d.points[i] !== null ? h('button', { class: 'clear', type: 'button', 'aria-label': `Esborra els punts de ${name}`, onclick: () => setPoints(i, null) }, '×') : null,
       ),
       h('div', { class: 'stepper' },
-        h('button', {
-          class: 'step', type: 'button', 'aria-label': 'Resta 1',
-          disabled: (value ?? 0) <= (isPap ? PAPAYOO_POINTS : 0) && value !== null,
-          onclick: () => bump(i, -1),
-        }, '−'),
+        h('button', { class: 'step', type: 'button', 'aria-label': `Resta 1 a ${name}`, disabled: value !== null && value <= min, onclick: () => bump(i, -1) }, '−'),
         h('input', {
           class: `points${isAuto ? ' is-auto' : ''}${isAuto && autoBad ? ' bad' : ''}`,
-          type: 'text', inputmode: 'numeric', pattern: '[0-9]*', id: inputId,
+          type: 'text', inputmode: 'numeric', pattern: '[0-9]*', id: `points-${i}`,
           autocomplete: 'off', enterkeyhint: 'next',
           value: value === null ? '' : String(value),
-          placeholder: isPap ? `≥ ${PAPAYOO_POINTS}` : '0',
+          placeholder: isPap ? `${PAPAYOO_POINTS} o més` : '0',
           'aria-label': `Punts de ${name}`,
           // En entrar al camp se selecciona tot: escriure substitueix el valor (també el calculat).
           onfocus: (e) => {
@@ -311,46 +325,39 @@ function renderRoundEntry(g) {
             if (next) next.focus(); else e.target.blur();
           },
           onblur: () => {
-            // En sortir del camp, aplica el mínim del Papayoo (no ho fem mentre s'escriu).
+            // El mínim del Papayoo s'aplica en sortir del camp, no mentre s'escriu.
             if (isPap && d.points[i] !== null && d.points[i] < PAPAYOO_POINTS) setPoints(i, PAPAYOO_POINTS);
           },
         }),
-        h('button', {
-          class: 'step', type: 'button', 'aria-label': 'Suma 1',
-          disabled: value !== null && value >= maxPointsFor(isPap),
-          onclick: () => bump(i, 1),
-        }, '+'),
+        h('button', { class: 'step', type: 'button', 'aria-label': `Suma 1 a ${name}`, disabled: value !== null && value >= max, onclick: () => bump(i, 1) }, '+'),
       ),
-      h('div', { class: 'quick' },
-        [-10, -5, 5, 10].map(delta => h('button', {
-          type: 'button',
-          disabled: value !== null && (delta < 0 ? value + delta < (isPap ? PAPAYOO_POINTS : 0) : value + delta > maxPointsFor(isPap)),
-          onclick: () => bump(i, delta),
-        }, `${delta > 0 ? '+' : '−'}${Math.abs(delta)}`)),
-      ),
+      h('div', { class: 'quick' }, [-10, -5, 5, 10].map(delta => h('button', {
+        type: 'button', 'aria-label': `${delta > 0 ? 'Suma' : 'Resta'} ${Math.abs(delta)} a ${name}`,
+        disabled: value !== null && (delta < 0 ? value + delta < min : value + delta > max),
+        onclick: () => bump(i, delta),
+      }, `${delta > 0 ? '+' : '−'}${Math.abs(delta)}`))),
     );
   });
 
   const sumEntered = res.valid ? TOTAL : d.points.reduce((a, p) => a + (p ?? 0), 0);
-  let status;
-  if (res.valid) status = h('span', { class: 'pill left ok' }, `${TOTAL} punts repartits ✓`);
-  else if (res.remaining < 0) status = h('span', { class: 'pill left bad' }, `Sobren ${-res.remaining} punts`);
-  else if (missing > 1) status = h('span', { class: 'pill left' }, `Queden ${res.remaining} punts per a ${missing} jugadors`);
-  else status = h('span', { class: 'pill left' }, `Queden ${res.remaining} punts`);
-
+  let stateText, stateClass = '';
+  if (res.valid) { stateText = 'Tot quadra'; stateClass = 'ok'; }
+  else if (res.remaining < 0) { stateText = `Sobren ${-res.remaining} punts`; stateClass = 'bad'; }
+  else if (missing > 1) stateText = `Queden ${res.remaining} punts per a ${missing} jugadors`;
+  else stateText = `Queden ${res.remaining} punts`;
   const firstError = res.errors.find(e => e !== 'papayoo-missing') ?? (missing <= 1 ? res.errors[0] : null);
 
-  return h('section', { class: 'card', id: 'round-entry' },
-    h('h2', null, `Ronda ${g.rounds.length + 1}`),
-    h('p', { style: 'margin:0 0 8px;font-weight:700' }, 'Qui s\'ha endut el Papayoo?'),
-    chips,
-    d.papayoo === null ? h('p', { class: 'hint' }, 'Obligatori: el Papayoo val 40 punts i sempre se l\'endú algú.') : null,
-    h('div', { style: 'margin-top:14px' }, playerRows),
-    h('div', { class: 'summary' },
-      status,
-      h('span', { class: `total${res.valid ? ' ok' : (res.remaining < 0 ? ' bad' : '')}` }, `${sumEntered} / ${TOTAL}`),
+  return h('section', { class: 'section', id: 'round-entry' },
+    h('h2', { class: 'section-title' }, `Ronda ${g.rounds.length + 1}`),
+    h('p', { class: 'lede' }, 'Qui s\'ha endut el Papayoo?'),
+    holder,
+    d.papayoo === null ? h('p', { class: 'note' }, `Sempre se l'endú algú: val ${PAPAYOO_POINTS} punts.`) : null,
+    h('ul', { class: 'entry' }, rows),
+    h('div', { class: 'tally' },
+      h('span', { class: `state ${stateClass}` }, stateText),
+      h('span', { class: `sum ${stateClass}` }, sumEntered, h('small', null, ` / ${TOTAL}`)),
     ),
-    firstError ? h('p', { class: 'error-text', style: 'margin:0 0 10px' }, ERROR_TEXT[firstError]) : null,
+    firstError ? h('p', { class: 'error', style: { margin: '0 0 12px' } }, ERROR_TEXT[firstError]) : null,
     h('button', {
       class: 'btn block', type: 'button', disabled: !res.valid,
       onclick: () => {
@@ -366,22 +373,78 @@ function renderRoundEntry(g) {
   );
 }
 
-function renderHistory(g) {
-  if (!g.rounds.length) return null;
+function legend(players) {
+  return h('ul', { class: 'legend' }, players.map((p, i) => h('li', null, dot(i), p)));
+}
+
+function renderRoundsTable(g) {
   const tot = standings(g.players, g.rounds).sort((a, b) => a.index - b.index).map(r => r.total);
-  return h('section', { class: 'card' },
-    h('h2', null, 'Historial'),
+  return h('div', null,
     h('div', { class: 'scroll-x' },
-      h('table', { class: 'history' },
+      h('table', { class: 'rounds' },
         h('thead', null, h('tr', null, h('th', null, 'Ronda'), g.players.map(p => h('th', { title: p }, p)))),
         h('tbody', null, g.rounds.map((r, ri) => h('tr', null,
           h('td', null, ri + 1),
-          r.points.map((p, i) => h('td', { class: r.papayoo === i ? 'papayoo' : null }, p)),
+          r.points.map((p, i) => h('td', { class: r.papayoo === i ? 'pap' : null }, p)),
         ))),
         h('tfoot', null, h('tr', null, h('td', null, 'Total'), tot.map(t => h('td', null, t)))),
       ),
     ),
-    h('p', { class: 'hint' }, '● = tenia el Papayoo aquella ronda'),
+    h('p', { class: 'note legend-note' }, pcard(), 'En color: qui tenia el Papayoo aquella ronda.'),
+  );
+}
+
+// ---------- Partides anteriors ----------
+function renderHistory() {
+  const list = state.games.length
+    ? h('ul', { class: 'games' }, state.games.map(g => {
+      const rows = standings(g.players, g.rounds);
+      const winners = rows.filter(r => r.rank === 1).map(r => r.name);
+      return h('li', null, h('button', { type: 'button', onclick: () => go('detail', { viewing: g.id }) },
+        h('span', { class: 'when' }, `${fmtDate(g.endedAt)}, ${g.rounds.length} ${g.rounds.length === 1 ? 'ronda' : 'rondes'}`),
+        h('span', { class: 'who' }, g.players.join(', ')),
+        h('span', { class: 'won' }, winners.join(' i '), h('small', null, `${rows[0].total} punts`)),
+      ));
+    }))
+    : h('p', { class: 'empty' }, 'Encara no hi ha cap partida acabada. Quan n\'acabeu una, la trobareu aquí.');
+
+  return h('div', null,
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go(state.game ? 'game' : 'setup') }, state.game ? 'Torna a la partida' : 'Inici')),
+    section('Partides anteriors', state.games.length ? `${state.games.length}` : null, list),
+  );
+}
+
+function renderDetail() {
+  const g = state.games.find(x => x.id === state.viewing);
+  if (!g) return renderHistory();
+  const rows = standings(g.players, g.rounds);
+  const winners = rows.filter(r => r.rank === 1).map(r => r.name);
+  return h('div', null,
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('history') }, 'Partides anteriors')),
+    h('section', { class: 'winner' },
+      h('p', { class: 'lead' }, `${fmtDate(g.endedAt)}, ${g.rounds.length} ${g.rounds.length === 1 ? 'ronda' : 'rondes'}`),
+      h('p', { class: 'name' }, winners.join(' i ')),
+      h('p', { class: 'sub' }, `${rows[0].total} punts. ${winners.length > 1 ? 'Empat al capdavant.' : ''}`),
+    ),
+    section('Classificació final', 'menys punts guanya',
+      h('ol', { class: 'ledger' }, rows.map(r => h('li', { class: r.rank === 1 ? 'first' : null },
+        h('span', { class: 'pos' }, `${r.rank}.`),
+        h('span', { class: 'who' }, dot(r.index), h('span', null, r.name)),
+        h('span', { class: 'score' }, r.total),
+      ))),
+    ),
+    section('Com va anar', 'acumulat, menys és millor', renderChart(g.players, g.rounds), legend(g.players)),
+    section('Ronda a ronda', null, renderRoundsTable(g)),
+    h('div', { class: 'actions center' },
+      h('button', {
+        class: 'btn quiet danger', type: 'button',
+        onclick: () => {
+          if (!confirm('Vols esborrar aquesta partida de l\'historial?')) return;
+          setState(st => { st.games = st.games.filter(x => x.id !== g.id); st.viewing = null; });
+          go('history');
+        },
+      }, 'Esborra aquesta partida'),
+    ),
   );
 }
 
