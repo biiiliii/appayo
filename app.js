@@ -1,6 +1,6 @@
 import {
   TOTAL, PAPAYOO_POINTS, MIN_PLAYERS, MAX_PLAYERS,
-  resolveRound, clampPoints, maxPointsFor, standings, validateSetup, createGame,
+  resolveRound, clampPoints, standings, validateSetup, createGame, normalizeNames,
 } from './logic.js';
 import { renderChart, seriesColor } from './chart.js';
 
@@ -8,21 +8,19 @@ const STORAGE_KEY = 'appayo:v1';
 const root = document.getElementById('app');
 
 const ERROR_TEXT = {
-  'papayoo-missing': 'Cal dir qui té el Papayoo.',
-  'papayoo-too-low': `Qui té el Papayoo ha de tenir com a mínim ${PAPAYOO_POINTS} punts.`,
+  'papayoo-missing': 'Cal dir qui s\'ha endut el Papayoo.',
   'over-total': `La suma passa de ${TOTAL}.`,
   'sum-mismatch': `La suma ha de ser exactament ${TOTAL}.`,
   'negative': 'No hi pot haver punts negatius.',
   'too-few': `Calen com a mínim ${MIN_PLAYERS} jugadors.`,
   'too-many': `Com a màxim ${MAX_PLAYERS} jugadors.`,
-  'empty-name': 'Tots els jugadors han de tenir nom.',
   'duplicate-name': 'Hi ha dos jugadors amb el mateix nom.',
 };
 
 // ---------- Estat ----------
 const state = Object.assign({
   screen: 'setup',
-  setup: { names: ['', '', '', ''], roundsPlanned: 5 },
+  setup: { names: ['', '', ''], roundsPlanned: 'players' },
   game: null,
   draft: null,
   games: [],      // partides acabades, la més recent primer
@@ -140,11 +138,12 @@ function renderSetup() {
     }, '×'),
   )));
 
-  const roundOptions = [3, 4, 5, 6, 8, 10, null];
+  const roundOptions = ['players', 3, 4, 5, 6, 8, 10, null];
+  const roundLabel = (n) => n === 'players' ? `Tantes com jugadors (${s.names.length})` : n === null ? 'Sense límit' : n;
   const rounds = h('div', { class: 'choices' }, roundOptions.map(n => h('button', {
     class: 'choice', type: 'button', 'aria-pressed': String(s.roundsPlanned === n),
     onclick: () => setState(st => { st.setup.roundsPlanned = n; }),
-  }, n === null ? 'Sense límit' : n)));
+  }, roundLabel(n))));
 
   const resume = state.game ? section('Partida en curs', null,
     h('p', { class: 'lede' }, `${state.game.players.join(', ')}. ${state.game.rounds.length === 1 ? 'Una ronda jugada' : `${state.game.rounds.length} rondes jugades`}.`),
@@ -156,6 +155,7 @@ function renderSetup() {
       state.games.length ? `Partides anteriors (${state.games.length})` : 'Partides anteriors')),
     resume,
     section('Qui juga?', `de ${MIN_PLAYERS} a ${MAX_PLAYERS}`,
+      h('p', { class: 'lede' }, 'Escriu els noms si vols. Si no, seran Jugador 1, 2, 3...'),
       roster,
       h('div', { class: 'actions end' },
         h('button', {
@@ -166,7 +166,7 @@ function renderSetup() {
     ),
     section('Quantes rondes?', null,
       rounds,
-      h('p', { class: 'note' }, 'Les normes en recomanen 5. En acabar sempre en podreu afegir més.'),
+      h('p', { class: 'note' }, 'Normalment es juga una ronda per jugador. En acabar sempre en podreu afegir més.'),
     ),
     h('section', { class: 'section' },
       errorBox,
@@ -261,26 +261,18 @@ function renderRoundEntry(g) {
   const n = g.players.length;
   const res = resolveRound(d);
   const missing = d.points.filter(p => p === null).length;
-  const autoBad = res.auto !== null && (res.errors.includes('over-total') || res.errors.includes('papayoo-too-low'));
+  const autoBad = res.auto !== null && res.errors.includes('over-total');
 
   const setPoints = (i, value) => setState(st => {
-    const isPap = st.draft.papayoo === i;
-    st.draft.points[i] = value === null ? null : Math.max(0, Math.min(maxPointsFor(isPap), Math.trunc(value)));
+    st.draft.points[i] = value === null ? null : clampPoints(value);
   });
   const displayValue = (i) => (d.points[i] !== null ? d.points[i] : (res.auto === i ? res.points[i] : null));
-  const bump = (i, delta) => {
-    const isPap = d.papayoo === i;
-    const base = displayValue(i) ?? (isPap ? PAPAYOO_POINTS : 0);
-    setPoints(i, clampPoints(base + delta, isPap));
-  };
+  const bump = (i, delta) => setPoints(i, clampPoints((displayValue(i) ?? 0) + delta));
 
   const holder = h('div', { class: 'holder', role: 'group', 'aria-label': 'Qui té el Papayoo' },
     g.players.map((name, i) => h('button', {
       type: 'button', 'aria-pressed': String(d.papayoo === i),
-      onclick: () => setState(st => {
-        st.draft.papayoo = i;
-        if (st.draft.points[i] !== null && st.draft.points[i] < PAPAYOO_POINTS) st.draft.points[i] = PAPAYOO_POINTS;
-      }),
+      onclick: () => setState(st => { st.draft.papayoo = i; }),
     }, pcard(), name)),
   );
 
@@ -288,8 +280,8 @@ function renderRoundEntry(g) {
     const isPap = d.papayoo === i;
     const isAuto = res.auto === i;
     const value = displayValue(i);
-    const min = isPap ? PAPAYOO_POINTS : 0;
-    const max = maxPointsFor(isPap);
+    const min = 0;
+    const max = TOTAL;
     return h('li', null,
       h('div', { class: 'who' },
         dot(i),
@@ -299,13 +291,13 @@ function renderRoundEntry(g) {
         d.points[i] !== null ? h('button', { class: 'clear', type: 'button', 'aria-label': `Esborra els punts de ${name}`, onclick: () => setPoints(i, null) }, '×') : null,
       ),
       h('div', { class: 'stepper' },
-        h('button', { class: 'step', type: 'button', 'aria-label': `Resta 1 a ${name}`, disabled: value !== null && value <= min, onclick: () => bump(i, -1) }, '−'),
+        h('button', { class: 'step', type: 'button', 'aria-label': `Resta 1 a ${name}`, disabled: value !== null && value <= min, onclick: () => bump(i, -1) }, '−1'),
         h('input', {
           class: `points${isAuto ? ' is-auto' : ''}${isAuto && autoBad ? ' bad' : ''}`,
           type: 'text', inputmode: 'numeric', pattern: '[0-9]*', id: `points-${i}`,
           autocomplete: 'off', enterkeyhint: 'next',
           value: value === null ? '' : String(value),
-          placeholder: isPap ? `${PAPAYOO_POINTS} o més` : '0',
+          placeholder: '0',
           'aria-label': `Punts de ${name}`,
           // En entrar al camp se selecciona tot: escriure substitueix el valor (també el calculat).
           onfocus: (e) => {
@@ -324,12 +316,8 @@ function renderRoundEntry(g) {
             const next = document.getElementById(`points-${i + 1}`);
             if (next) next.focus(); else e.target.blur();
           },
-          onblur: () => {
-            // El mínim del Papayoo s'aplica en sortir del camp, no mentre s'escriu.
-            if (isPap && d.points[i] !== null && d.points[i] < PAPAYOO_POINTS) setPoints(i, PAPAYOO_POINTS);
-          },
         }),
-        h('button', { class: 'step', type: 'button', 'aria-label': `Suma 1 a ${name}`, disabled: value !== null && value >= max, onclick: () => bump(i, 1) }, '+'),
+        h('button', { class: 'step', type: 'button', 'aria-label': `Suma 1 a ${name}`, disabled: value !== null && value >= max, onclick: () => bump(i, 1) }, '+1'),
       ),
       h('div', { class: 'quick' }, [-10, -5, 5, 10].map(delta => h('button', {
         type: 'button', 'aria-label': `${delta > 0 ? 'Suma' : 'Resta'} ${Math.abs(delta)} a ${name}`,
@@ -351,7 +339,7 @@ function renderRoundEntry(g) {
     h('h2', { class: 'section-title' }, `Ronda ${g.rounds.length + 1}`),
     h('p', { class: 'lede' }, 'Qui s\'ha endut el Papayoo?'),
     holder,
-    d.papayoo === null ? h('p', { class: 'note' }, `Sempre se l'endú algú: val ${PAPAYOO_POINTS} punts.`) : null,
+    d.papayoo === null ? h('p', { class: 'note' }, `Sempre se l'endú algú. Només és per recordar-ho: els seus ${PAPAYOO_POINTS} punts ja van dins del total del jugador.`) : null,
     h('ul', { class: 'entry' }, rows),
     h('div', { class: 'tally' },
       h('span', { class: `state ${stateClass}` }, stateText),

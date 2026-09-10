@@ -4,22 +4,17 @@ export const TOTAL = 250;
 export const PAPAYOO_POINTS = 40;
 export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 8;
-export const MAX_PAYOO = TOTAL - PAPAYOO_POINTS; // 210: màxim per a qui no té el Papayoo
 
-export function maxPointsFor(isPapayoo) {
-  return isPapayoo ? TOTAL : MAX_PAYOO;
-}
-
-/** Converteix qualsevol entrada en un enter dins de [mín, màx] del jugador. Mai negatiu. */
-export function clampPoints(value, isPapayoo) {
+/** Converteix qualsevol entrada en un enter dins de [0, 250]. Mai negatiu. */
+export function clampPoints(value) {
   let n = Math.trunc(Number(value));
   if (!Number.isFinite(n)) n = 0;
-  const min = isPapayoo ? PAPAYOO_POINTS : 0;
-  return Math.max(min, Math.min(maxPointsFor(isPapayoo), n));
+  return Math.max(0, Math.min(TOTAL, n));
 }
 
 /**
- * Resol una ronda a mig introduir.
+ * Resol una ronda a mig introduir. El Papayoo només indica qui se l'ha endut (els seus 40 punts
+ * ja van dins del total que introdueix cada jugador), però és obligatori dir-ho.
  * @param {{papayoo: number|null, points: (number|null)[]}} input  null = punts no introduïts
  * @returns {{valid: boolean, points: (number|null)[], auto: number|null, remaining: number, errors: string[]}}
  */
@@ -50,12 +45,7 @@ export function resolveRound({ papayoo, points }) {
     errors.push('over-total');
   }
 
-  if (papayoo === null || papayoo === undefined) {
-    errors.push('papayoo-missing');
-  } else if (resolved[papayoo] !== null && resolved[papayoo] !== undefined
-             && resolved[papayoo] < PAPAYOO_POINTS) {
-    errors.push('papayoo-too-low');
-  }
+  if (papayoo === null || papayoo === undefined) errors.push('papayoo-missing');
 
   const unique = [...new Set(errors)];
   return {
@@ -86,20 +76,26 @@ export function standings(players, rounds) {
   return rows;
 }
 
+/** Noms nets; un nom buit passa a ser "Jugador N". */
+export function normalizeNames(names) {
+  return names.map((n, i) => ((n ?? '').trim() || `Jugador ${i + 1}`));
+}
+
 export function validateSetup(names) {
   const errors = [];
   if (names.length < MIN_PLAYERS) errors.push('too-few');
   if (names.length > MAX_PLAYERS) errors.push('too-many');
-  const trimmed = names.map(n => (n ?? '').trim());
-  if (trimmed.some(n => n === '')) errors.push('empty-name');
-  if (new Set(trimmed.map(n => n.toLowerCase())).size !== trimmed.length) errors.push('duplicate-name');
+  const clean = normalizeNames(names);
+  if (new Set(clean.map(n => n.toLowerCase())).size !== clean.length) errors.push('duplicate-name');
   return errors;
 }
 
+/** @param roundsPlanned  un nombre, null (sense límit) o 'players' (tantes rondes com jugadors) */
 export function createGame(players, roundsPlanned) {
+  const names = normalizeNames(players);
   return {
-    players: players.map(n => n.trim()),
-    roundsPlanned: roundsPlanned || null,
+    players: names,
+    roundsPlanned: roundsPlanned === 'players' ? names.length : (roundsPlanned || null),
     rounds: [],
     createdAt: Date.now(),
   };

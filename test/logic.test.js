@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  TOTAL, PAPAYOO_POINTS, resolveRound, clampPoints, maxPointsFor,
-  totals, standings, createGame, validateSetup,
+  TOTAL, PAPAYOO_POINTS, resolveRound, clampPoints,
+  totals, standings, createGame, validateSetup, normalizeNames,
 } from '../logic.js';
 
 test('constants', () => {
@@ -32,17 +32,10 @@ test('papayoo must be assigned', () => {
   assert.ok(r.errors.includes('papayoo-missing'));
 });
 
-test('papayoo holder must have at least 40 points', () => {
+test('papayoo is only an indicator: any points are fine for the holder', () => {
   const r = resolveRound({ papayoo: 3, points: [100, 50, 80, 20] });
-  assert.equal(r.valid, false);
-  assert.ok(r.errors.includes('papayoo-too-low'));
-});
-
-test('auto-assigned papayoo holder below 40 is an error', () => {
-  const r = resolveRound({ papayoo: 2, points: [120, 100, null, 20] });
-  assert.equal(r.valid, false);
-  assert.equal(r.points[2], 10);
-  assert.ok(r.errors.includes('papayoo-too-low'));
+  assert.equal(r.valid, true);
+  assert.deepEqual(r.errors, []);
 });
 
 test('sum above 250 gives a negative remainder error', () => {
@@ -66,18 +59,11 @@ test('negative points are rejected', () => {
   assert.ok(r.errors.includes('negative'));
 });
 
-test('clampPoints never returns negatives and respects the maximum', () => {
-  assert.equal(clampPoints(-3, false), 0);
-  assert.equal(clampPoints(300, false), 210);
-  assert.equal(clampPoints(300, true), 250);
-  assert.equal(clampPoints(10, true), 40);
-  assert.equal(clampPoints('abc', false), 0);
-  assert.equal(clampPoints(12.7, false), 12);
-});
-
-test('maxPointsFor', () => {
-  assert.equal(maxPointsFor(true), 250);
-  assert.equal(maxPointsFor(false), 210);
+test('clampPoints never returns negatives and caps at 250', () => {
+  assert.equal(clampPoints(-3), 0);
+  assert.equal(clampPoints(300), 250);
+  assert.equal(clampPoints('abc'), 0);
+  assert.equal(clampPoints(12.7), 12);
 });
 
 test('totals and standings (lowest wins)', () => {
@@ -96,17 +82,24 @@ test('standings share rank on ties', () => {
   assert.deepEqual(s.map(x => [x.name, x.rank]), [['C', 1], ['A', 2], ['B', 2]]);
 });
 
-test('validateSetup requires 3..8 non-empty distinct names', () => {
+test('validateSetup requires 3..8 distinct names; empty names are allowed', () => {
   assert.deepEqual(validateSetup(['A', 'B']), ['too-few']);
-  assert.deepEqual(validateSetup(['A', 'B', '']), ['empty-name']);
+  assert.deepEqual(validateSetup(['A', 'B', '']), []);
   assert.deepEqual(validateSetup(['A', 'B', 'A']), ['duplicate-name']);
+  assert.deepEqual(validateSetup(['Jugador 3', 'B', '']), ['duplicate-name']);
   assert.deepEqual(validateSetup(['A', 'B', 'C']), []);
   assert.deepEqual(validateSetup('ABCDEFGHI'.split('')), ['too-many']);
 });
 
+test('normalizeNames fills empty names with Jugador N', () => {
+  assert.deepEqual(normalizeNames([' Anna ', '', '  ']), ['Anna', 'Jugador 2', 'Jugador 3']);
+});
+
 test('createGame', () => {
-  const g = createGame(['A', 'B', 'C'], 5);
-  assert.deepEqual(g.players, ['A', 'B', 'C']);
+  const g = createGame(['A', '', 'C'], 5);
+  assert.deepEqual(g.players, ['A', 'Jugador 2', 'C']);
   assert.equal(g.roundsPlanned, 5);
   assert.deepEqual(g.rounds, []);
+  assert.equal(createGame(['A', 'B', 'C', 'D'], 'players').roundsPlanned, 4);
+  assert.equal(createGame(['A', 'B', 'C'], null).roundsPlanned, null);
 });

@@ -178,8 +178,9 @@ button { cursor: pointer; }
 
 .stepper { display: grid; grid-template-columns: 60px 1fr 60px; gap: 8px; }
 .stepper .step {
+  font-feature-settings: "tnum" 1;
   border-radius: var(--r-s); border: 2px solid var(--ink); background: var(--sheet); color: var(--ink);
-  font-size: 28px; font-weight: 500; line-height: 1;
+  font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: -.02em;
 }
 .stepper .step:active { background: var(--ink); color: #fff; }
 .stepper .step:disabled { border-color: var(--rule); color: var(--rule); background: transparent; }
