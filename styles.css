@@ -99,7 +99,6 @@ button { cursor: pointer; }
 /* ---- Llista de jugadors (inici) ---- */
 .roster { list-style: none; margin: 0; padding: 0; }
 .roster li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--rule); }
-.roster .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; }
 .text {
   flex: 1; min-width: 0; min-height: 46px; padding: 0 4px; border: 0; background: transparent;
   font-size: 19px; font-weight: 600; border-radius: 4px;
@@ -128,7 +127,6 @@ button { cursor: pointer; }
 .ledger li:last-child { border-bottom: 0; }
 .ledger .who { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 600; min-width: 0; }
 .ledger .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .ledger .score {
   font-size: 30px; line-height: 1; font-weight: 800; font-stretch: 90%; letter-spacing: -.02em;
   font-variation-settings: "opsz" 96;
@@ -227,8 +225,10 @@ button { cursor: pointer; }
 .chart .grid line { stroke: var(--rule); stroke-width: 1; }
 .chart .axis text { fill: var(--muted); font-size: 12px; }
 .chart .axis line { stroke: var(--rule-strong); stroke-width: 1; }
-.chart .series path { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-.chart .series circle { stroke: var(--sheet); stroke-width: 2; }
+.chart .series path.line { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.chart .series path.mark { stroke: var(--sheet); stroke-width: 3; paint-order: stroke; }
+.sym { flex: none; display: inline-block; vertical-align: -3px; }
+.th-name { display: inline-flex; align-items: center; gap: 4px; }
 .chart .label { font-size: 13px; font-weight: 600; fill: var(--ink); }
 .chart .cursor { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
 .chart .hit { fill: transparent; }

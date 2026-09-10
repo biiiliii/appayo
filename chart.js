@@ -1,5 +1,6 @@
 // Gràfica de l'evolució dels punts acumulats per ronda. SVG generat a mà, sense dependències.
 import { totals } from './logic.js';
+import { symbolPath } from './symbols.js';
 
 const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
 export const seriesColor = (i) => SERIES[i % SERIES.length];
@@ -28,7 +29,7 @@ export function renderChart(players, rounds) {
   const data = cumulative(players, rounds);
   const nRounds = rounds.length;
   const maxY = Math.max(50, ...data.flat());
-  const W = 560, H = 260;
+  const W = 560, H = 320;
   const labelW = players.length <= 4 ? 70 : 0;
   const m = { top: 12, right: 12 + labelW, bottom: 28, left: 36 };
   const x = (r) => m.left + (r / nRounds) * (W - m.left - m.right);
@@ -56,8 +57,14 @@ export function renderChart(players, rounds) {
   data.forEach((d, i) => {
     const color = seriesColor(i);
     const path = d.map((v, r) => `${r ? 'L' : 'M'}${x(r).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-    series.append(el('path', { d: path, stroke: color }));
-    d.forEach((v, r) => { if (r) series.append(el('circle', { cx: x(r), cy: y(v), r: 4, fill: color })); });
+    series.append(el('path', { class: 'line', d: path, stroke: color }));
+    // Marcador amb el símbol del jugador (forma + color) i un anell blanc per separar-los quan se solapen
+    d.forEach((v, r) => {
+      if (!r) return;
+      const g = el('g', { transform: `translate(${(x(r) - 10).toFixed(1)} ${(y(v) - 10).toFixed(1)}) scale(0.83)` });
+      g.append(el('path', { class: 'mark', d: symbolPath(i), fill: color }));
+      series.append(g);
+    });
     if (labelW) {
       const k = finals.findIndex(f => f.i === i);
       series.append(el('text', { class: 'label', x: x(nRounds) + 10, y: labelYs[k] + 4 }, players[i]));
@@ -89,8 +96,9 @@ export function renderChart(players, rounds) {
       ...rows.map(({ p, i, v }) => {
         const row = document.createElement('div');
         const name = document.createElement('span');
-        const dot = document.createElement('i');
-        dot.className = 'dot'; dot.style.background = seriesColor(i);
+        const dot = document.createElementNS(svgNS, 'svg');
+        dot.setAttribute('viewBox', '0 0 24 24'); dot.setAttribute('width', 12); dot.setAttribute('height', 12);
+        dot.append(el('path', { d: symbolPath(i), fill: seriesColor(i) }));
         name.append(dot, p);
         row.append(name, Object.assign(document.createElement('span'), { textContent: String(v) }));
         return row;

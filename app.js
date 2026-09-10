@@ -3,6 +3,7 @@ import {
   resolveRound, clampPoints, standings, validateSetup, createGame, normalizeNames,
 } from './logic.js';
 import { renderChart, seriesColor } from './chart.js';
+import { symbolEl } from './symbols.js';
 
 const STORAGE_KEY = 'appayo:v1';
 const root = document.getElementById('app');
@@ -73,7 +74,7 @@ function h(tag, attrs, ...children) {
   }
   return el;
 }
-const dot = (i) => h('i', { class: 'dot', style: { background: seriesColor(i) } });
+const dot = (i, size) => symbolEl(i, seriesColor(i), size);
 const pcard = (lg) => h('span', { class: `pcard${lg ? ' lg' : ''}`, 'aria-label': 'Papayoo' }, '7');
 const fmtDate = (ts) => new Date(ts).toLocaleDateString('ca', { day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -118,7 +119,7 @@ function renderSetup() {
   const errorBox = h('p', { class: 'error', hidden: true });
 
   const roster = h('ul', { class: 'roster' }, s.names.map((name, i) => h('li', null,
-    dot(i),
+    dot(i, 20),
     h('input', {
       class: 'text', type: 'text', id: `name-${i}`, value: name,
       placeholder: `Jugador ${i + 1}`, autocomplete: 'off', autocapitalize: 'words', maxlength: 20,
@@ -247,10 +248,10 @@ function renderWinner(g) {
 function renderStandings(g, finished) {
   const rows = standings(g.players, g.rounds);
   const last = g.rounds[g.rounds.length - 1];
-  return section(finished ? 'Classificació final' : 'Classificació', g.rounds.length ? 'menys punts guanya' : null,
+  return section(finished ? 'Com ha quedat' : 'Com anem?', g.rounds.length ? 'menys punts guanya' : null,
     h('ol', { class: 'ledger' }, rows.map(r => h('li', { class: r.rank === 1 && g.rounds.length ? 'first' : null },
       h('span', { class: 'pos' }, g.rounds.length ? `${r.rank}.` : ''),
-      h('span', { class: 'who' }, dot(r.index), h('span', null, r.name), last && last.papayoo === r.index ? pcard() : null),
+      h('span', { class: 'who' }, dot(r.index, 18), h('span', null, r.name), last && last.papayoo === r.index ? pcard() : null),
       h('span', { class: 'score' }, r.total, last ? h('span', { class: 'last' }, `+${last.points[r.index]}`) : null),
     ))),
   );
@@ -284,7 +285,7 @@ function renderRoundEntry(g) {
     const max = TOTAL;
     return h('li', null,
       h('div', { class: 'who' },
-        dot(i),
+        dot(i, 18),
         h('span', { class: 'name' }, name),
         isPap ? pcard() : null,
         isAuto ? h('span', { class: `tag rest${autoBad ? ' bad' : ''}` }, 'la resta') : null,
@@ -370,7 +371,7 @@ function renderRoundsTable(g) {
   return h('div', null,
     h('div', { class: 'scroll-x' },
       h('table', { class: 'rounds' },
-        h('thead', null, h('tr', null, h('th', null, 'Ronda'), g.players.map(p => h('th', { title: p }, p)))),
+        h('thead', null, h('tr', null, h('th', null, 'Ronda'), g.players.map((p, i) => h('th', { title: p }, h('span', { class: 'th-name' }, dot(i, 13), p))))),
         h('tbody', null, g.rounds.map((r, ri) => h('tr', null,
           h('td', null, ri + 1),
           r.points.map((p, i) => h('td', { class: r.papayoo === i ? 'pap' : null }, p)),
@@ -414,10 +415,10 @@ function renderDetail() {
       h('p', { class: 'name' }, winners.join(' i ')),
       h('p', { class: 'sub' }, `${rows[0].total} punts. ${winners.length > 1 ? 'Empat al capdavant.' : ''}`),
     ),
-    section('Classificació final', 'menys punts guanya',
+    section('Com va quedar', 'menys punts guanya',
       h('ol', { class: 'ledger' }, rows.map(r => h('li', { class: r.rank === 1 ? 'first' : null },
         h('span', { class: 'pos' }, `${r.rank}.`),
-        h('span', { class: 'who' }, dot(r.index), h('span', null, r.name)),
+        h('span', { class: 'who' }, dot(r.index, 18), h('span', null, r.name)),
         h('span', { class: 'score' }, r.total),
       ))),
     ),
