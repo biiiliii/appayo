@@ -34,6 +34,8 @@ Fitxers:
 
 ## Publicar
 
+Publicada a **https://appayo.vercel.app** (projecte `appayo` a Vercel; `vercel --prod` des d'aquesta carpeta torna a desplegar).
+
 És una carpeta estàtica: es pot pujar a Vercel, Netlify, GitHub Pages o qualsevol
 servidor. Per instal·lar-la al mòbil cal servir-la per HTTPS: a iPhone, Safari →
 Compartir → "Afegeix a la pantalla d'inici"; a Android, Chrome → "Instal·la l'app".
