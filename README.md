@@ -12,6 +12,9 @@ instal·lable a la pantalla d'inici i que funciona sense connexió.
 5. Desa la ronda. Guanya qui té menys punts.
 6. Durant la partida hi ha la classificació, una gràfica de l'evolució dels punts i la taula ronda a ronda.
 7. Les partides acabades queden a "Partides anteriors" (al mateix mòbil), amb classificació, gràfica i taula.
+8. Amb "Comparteix la partida" s'envia per WhatsApp (o el que sigui) un resum amb qui guanya i un
+   enllaç que obre la partida sencera. Qui el rep la pot desar a les seves partides. Si l'enllaç no
+   li obre l'app (als iPhone passa), pot enganxar-lo a "Partides anteriors".
 
 Regles que aplica l'app: total de 250 punts per ronda, cap valor negatiu, qui té el
 Papayoo té com a mínim 40 punts, i la resta com a màxim 210.
@@ -30,6 +33,8 @@ Fitxers:
 - `logic.js` — lògica pura de puntuació (provada a `test/`).
 - `app.js` — interfície i desat a `localStorage` (partida en curs i historial de partides).
 - `chart.js` — gràfica SVG de punts acumulats (sense dependències).
+- `share.js` — compartir una partida: la porta el mateix enllaç, darrere del `#`, i per això no
+  arriba mai a cap servidor (provat a `test/`).
 - `index.html`, `styles.css`, `fonts/` (Bricolage Grotesque, llicència OFL), `manifest.webmanifest`, `sw.js`, `icons/` — la PWA.
 
 ## Publicar

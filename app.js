@@ -4,6 +4,7 @@ import {
 } from './logic.js';
 import { renderChart, seriesColor } from './chart.js';
 import { symbolEl } from './symbols.js';
+import { decodeShared, shareLink, shareMessage, gameKey } from './share.js';
 
 const STORAGE_KEY = 'appayo:v1';
 const root = document.getElementById('app');
@@ -18,6 +19,12 @@ const ERROR_TEXT = {
   'duplicate-name': 'Hi ha dos jugadors amb el mateix nom.',
 };
 
+const SHARE_ERROR_TEXT = {
+  'bad-link': 'L\'enllaç no és sencer. Sovint es talla en copiar-lo: demana que te\'l tornin a enviar i obre\'l tocant-hi a sobre.',
+  'bad-version': 'L\'enllaç ve d\'una versió més nova de l\'Appayo. Torna a carregar la pàgina i prova-ho un altre cop.',
+  'bad-data': 'Els punts d\'aquesta partida no quadren, així que no es pot mostrar.',
+};
+
 // ---------- Estat ----------
 const state = Object.assign({
   screen: 'setup',
@@ -27,6 +34,13 @@ const state = Object.assign({
   games: [],      // partides acabades, la més recent primer
   viewing: null,  // id de la partida de l'historial que s'està mirant
 }, load() ?? {});
+
+// Partida rebuda per un enllaç: només viu mentre es mira, no es desa fins que es diu.
+let incoming = null;
+let incomingError = null;
+let pasting = false;
+let pasteError = null;
+let pasteText = '';
 
 function load() {
   try {
@@ -77,11 +91,78 @@ function h(tag, attrs, ...children) {
 const dot = (i, size) => symbolEl(i, seriesColor(i), size);
 const pcard = (lg) => h('span', { class: `pcard${lg ? ' lg' : ''}`, 'aria-label': 'Papayoo' }, '7');
 const fmtDate = (ts) => new Date(ts).toLocaleDateString('ca', { day: 'numeric', month: 'long', year: 'numeric' });
+const fmtRounds = (n) => `${n} ${n === 1 ? 'ronda' : 'rondes'}`;
+
+// ---------- Compartir ----------
+let toastTimer = null;
+function toast(message) {
+  document.querySelector('.toast')?.remove();
+  const el = h('p', { class: 'toast', role: 'status' }, message);
+  document.body.append(el);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.remove(), 3000);
+}
+
+const clearHash = () => history.replaceState(null, '', location.pathname + location.search);
+
+function shareGame(g) {
+  const snapshot = { players: g.players, rounds: g.rounds, createdAt: g.createdAt, endedAt: g.endedAt ?? Date.now() };
+  const text = shareMessage(snapshot, shareLink(snapshot, location.href));
+  if (navigator.share) {
+    // Si tanquen el menú de compartir no cal dir-los res.
+    navigator.share({ text }).catch(() => {});
+    return;
+  }
+  const copied = navigator.clipboard?.writeText(text);
+  if (copied) copied.then(() => toast('Enllaç copiat'), () => toast('No s\'ha pogut copiar l\'enllaç'));
+  else toast('Aquest navegador no pot compartir la partida');
+}
+
+const shareButton = (g) => h('button', { class: 'btn outline', type: 'button', onclick: () => shareGame(g) }, 'Comparteix la partida');
+
+/** Llegeix una partida de l'adreça (#p=...). Retorna si l'adreça en portava cap. */
+function readHash() {
+  if (!/[#&?]p=/.test(location.hash)) return false;
+  const read = decodeShared(location.hash);
+  incoming = read.ok ? read.game : null;
+  incomingError = read.ok ? null : read.error;
+  return true;
+}
+
+function saveIncoming(g) {
+  const entry = {
+    players: g.players,
+    rounds: g.rounds,
+    roundsPlanned: g.rounds.length,
+    createdAt: g.createdAt,
+    endedAt: g.endedAt,
+    id: `${g.createdAt}-${Math.random().toString(36).slice(2, 7)}`,
+    shared: true,
+  };
+  clearHash();
+  incoming = null;
+  setState(st => {
+    st.games.push(entry);
+    st.games.sort((a, b) => (b.endedAt ?? b.createdAt) - (a.endedAt ?? a.createdAt));
+    st.games = st.games.slice(0, 100);
+    st.viewing = entry.id;
+    st.screen = 'detail';
+  });
+  window.scrollTo(0, 0);
+  toast('Partida desada');
+}
+
+function leaveShared() {
+  clearHash();
+  incoming = null;
+  incomingError = null;
+  go(state.game ? 'game' : 'setup');
+}
 
 function render() {
   const active = document.activeElement;
   const focusId = active && active.id ? active.id : null;
-  const screens = { setup: renderSetup, game: renderGame, history: renderHistory, detail: renderDetail };
+  const screens = { setup: renderSetup, game: renderGame, history: renderHistory, detail: renderDetail, shared: renderShared };
   const fn = (state.screen === 'game' && !state.game) ? renderSetup : (screens[state.screen] || renderSetup);
   root.replaceChildren(fn());
   if (focusId) {
@@ -212,6 +293,7 @@ function renderGame() {
     h('div', { class: 'actions center' },
       finished ? h('button', { class: 'btn outline', type: 'button', onclick: () => setState(st => { st.game.roundsPlanned += 1; }) }, 'Juga una ronda més') : null,
       finished ? h('button', { class: 'btn', type: 'button', onclick: () => { setState(archiveCurrentGame); go('setup'); } }, 'Desa la partida a l\'historial') : null,
+      finished ? shareButton(g) : null,
       g.rounds.length ? h('button', {
         class: 'btn quiet', type: 'button',
         onclick: () => {
@@ -400,18 +482,58 @@ function renderHistory() {
   return h('div', null,
     masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go(state.game ? 'game' : 'setup') }, state.game ? 'Torna a la partida' : 'Inici')),
     section('Partides anteriors', state.games.length ? `${state.games.length}` : null, list),
+    section('T\'han enviat una partida?', null, renderPaste()),
   );
 }
 
-function renderDetail() {
-  const g = state.games.find(x => x.id === state.viewing);
-  if (!g) return renderHistory();
+/** Per a qui rep l'enllaç i no se li obre l'app (als iPhone passa): copiar-lo i enganxar-lo aquí. */
+function renderPaste() {
+  if (!pasting) {
+    return h('div', null,
+      h('button', {
+        class: 'btn outline block', type: 'button',
+        onclick: () => { pasting = true; pasteError = null; render(); },
+      }, 'Enganxa l\'enllaç que t\'han enviat'),
+      h('p', { class: 'note' }, 'Copia el missatge o l\'enllaç del WhatsApp i enganxa\'l aquí per veure la partida.'),
+    );
+  }
+  return h('div', null,
+    h('textarea', {
+      class: 'paste', id: 'paste-field', rows: 3, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+      placeholder: 'Enganxa aquí el missatge o l\'enllaç',
+      'aria-label': 'Enllaç de la partida',
+      value: pasteText,
+      oninput: (e) => { pasteText = e.target.value; },
+    }),
+    pasteError ? h('p', { class: 'error' }, SHARE_ERROR_TEXT[pasteError] ?? SHARE_ERROR_TEXT['bad-link']) : null,
+    h('div', { class: 'actions end' },
+      h('button', {
+        class: 'btn quiet', type: 'button',
+        onclick: () => { pasting = false; pasteError = null; pasteText = ''; render(); },
+      }, 'Deixa-ho estar'),
+      h('button', { class: 'btn', type: 'button', onclick: openPasted }, 'Obre la partida'),
+    ),
+  );
+}
+
+function openPasted() {
+  const read = decodeShared(pasteText);
+  if (!read.ok) { pasteError = read.error; render(); return; }
+  incoming = read.game;
+  incomingError = null;
+  pasting = false;
+  pasteError = null;
+  pasteText = '';
+  go('shared');
+}
+
+/** Una partida acabada de dalt a baix: guanyador, classificació, gràfica i taula. */
+function gameReport(g, lead) {
   const rows = standings(g.players, g.rounds);
   const winners = rows.filter(r => r.rank === 1).map(r => r.name);
-  return h('div', null,
-    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('history') }, 'Partides anteriors')),
+  return [
     h('section', { class: 'winner' },
-      h('p', { class: 'lead' }, `${fmtDate(g.endedAt)}, ${g.rounds.length} ${g.rounds.length === 1 ? 'ronda' : 'rondes'}`),
+      h('p', { class: 'lead' }, lead),
       h('p', { class: 'name' }, winners.join(' i ')),
       h('p', { class: 'sub' }, `${rows[0].total} punts. ${winners.length > 1 ? 'Empat al capdavant.' : ''}`),
     ),
@@ -424,7 +546,17 @@ function renderDetail() {
     ),
     section('Com va anar', 'acumulat, menys és millor', renderChart(g.players, g.rounds), legend(g.players)),
     section('Ronda a ronda', null, renderRoundsTable(g)),
+  ];
+}
+
+function renderDetail() {
+  const g = state.games.find(x => x.id === state.viewing);
+  if (!g) return renderHistory();
+  return h('div', null,
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('history') }, 'Partides anteriors')),
+    gameReport(g, `${fmtDate(g.endedAt)}, ${fmtRounds(g.rounds.length)}`),
     h('div', { class: 'actions center' },
+      shareButton(g),
       h('button', {
         class: 'btn quiet danger', type: 'button',
         onclick: () => {
@@ -437,8 +569,44 @@ function renderDetail() {
   );
 }
 
+// ---------- Partida rebuda per un enllaç ----------
+function renderShared() {
+  const back = h('button', { class: 'crumb', type: 'button', onclick: leaveShared }, state.game ? 'Torna a la partida' : 'Inici');
+
+  if (incomingError) {
+    return h('div', null,
+      masthead(back),
+      section('No s\'ha pogut obrir la partida', null,
+        h('p', { class: 'lede' }, SHARE_ERROR_TEXT[incomingError] ?? SHARE_ERROR_TEXT['bad-link']),
+        h('button', { class: 'btn block', type: 'button', onclick: leaveShared }, state.game ? 'Torna a la partida' : 'Ves a l\'inici'),
+      ),
+    );
+  }
+  const g = incoming;
+  if (!g) return renderSetup();
+  const already = state.games.some(x => gameKey(x) === gameKey(g));
+
+  return h('div', null,
+    masthead(back),
+    h('p', { class: 'received' }, 'T\'han enviat aquesta partida'),
+    gameReport(g, `${fmtDate(g.endedAt)}, ${fmtRounds(g.rounds.length)}`),
+    h('div', { class: 'actions center' },
+      already
+        ? h('p', { class: 'note' }, 'Aquesta partida ja la tens desada.')
+        : h('button', { class: 'btn', type: 'button', onclick: () => saveIncoming(g) }, 'Desa-la a les meves partides'),
+    ),
+  );
+}
+
 // ---------- Arrencada ----------
+if (readHash()) state.screen = 'shared';
 render();
+
+// Si toquen un altre enllaç amb l'app oberta, l'adreça canvia sense recarregar.
+window.addEventListener('hashchange', () => {
+  if (!readHash()) return;
+  go('shared');
+});
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
