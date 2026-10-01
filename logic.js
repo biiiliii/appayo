@@ -15,6 +15,7 @@ export function clampPoints(value) {
 /**
  * Resol una ronda a mig introduir. El Papayoo només indica qui se l'ha endut (els seus 40 punts
  * ja van dins del total que introdueix cada jugador), però és obligatori dir-ho.
+ * Qui es deixa en blanc fa 0 un cop ja s'han repartit els 250 punts; si només en queda un, rep la resta.
  * @param {{papayoo: number|null, points: (number|null)[]}} input  null = punts no introduïts
  * @returns {{valid: boolean, points: (number|null)[], auto: number|null, remaining: number, errors: string[]}}
  */
@@ -41,6 +42,8 @@ export function resolveRound({ papayoo, points }) {
     if (remaining < 0) errors.push('over-total');
   } else if (missing.length === 0) {
     if (sum !== TOTAL) errors.push('sum-mismatch');
+  } else if (remaining === 0) {
+    for (const i of missing) resolved[i] = 0;
   } else if (remaining < 0) {
     errors.push('over-total');
   }
@@ -49,7 +52,7 @@ export function resolveRound({ papayoo, points }) {
 
   const unique = [...new Set(errors)];
   return {
-    valid: unique.length === 0 && missing.length <= 1,
+    valid: unique.length === 0 && (missing.length <= 1 || remaining === 0),
     points: resolved,
     auto,
     remaining,

@@ -8,10 +8,12 @@ instal·lable a la pantalla d'inici i que funciona sense connexió.
 1. Escriu els noms dels jugadors (de 3 a 8) i tria quantes rondes jugareu.
 2. A cada ronda, primer digues **qui s'ha endut el Papayoo** (obligatori, val 40 punts).
 3. Posa els punts de cada jugador amb els botons (−10, −5, −, +, +5, +10) o escrivint al camp.
-4. L'últim jugador que quedi sense punts rep **la resta fins a 250** automàticament.
+4. L'últim jugador que quedi sense punts rep **la resta fins a 250** automàticament. Qui fa 0 no cal
+   tocar-lo: un cop repartits els 250 punts, els que s'han deixat en blanc compten 0.
 5. Desa la ronda. Guanya qui té menys punts.
 6. Durant la partida hi ha la classificació, una gràfica de l'evolució dels punts i la taula ronda a ronda.
 7. Les partides acabades queden a "Partides anteriors" (al mateix mòbil), amb classificació, gràfica i taula.
+   Cadascú pot esborrar-ne una (obrint-la) o tot l'historial; només s'esborra del seu mòbil.
 8. Amb "Comparteix la partida" s'envia per WhatsApp (o el que sigui) un resum amb qui guanya i un
    enllaç que obre la partida sencera. Qui el rep la pot desar a les seves partides. Si l'enllaç no
    li obre l'app (als iPhone passa), pot enganxar-lo a "Partides anteriors".

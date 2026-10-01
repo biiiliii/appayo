@@ -349,7 +349,8 @@ function renderRoundEntry(g) {
   const setPoints = (i, value) => setState(st => {
     st.draft.points[i] = value === null ? null : clampPoints(value);
   });
-  const displayValue = (i) => (d.points[i] !== null ? d.points[i] : (res.auto === i ? res.points[i] : null));
+  // Els que no s'han tocat mostren el que els toca: la resta, o 0 si ja estan repartits els 250.
+  const displayValue = (i) => (d.points[i] !== null ? d.points[i] : res.points[i]);
   const bump = (i, delta) => setPoints(i, clampPoints((displayValue(i) ?? 0) + delta));
 
   const holder = h('div', { class: 'holder', role: 'group', 'aria-label': 'Qui té el Papayoo' },
@@ -363,6 +364,7 @@ function renderRoundEntry(g) {
     const isPap = d.papayoo === i;
     const isAuto = res.auto === i;
     const value = displayValue(i);
+    const isCalc = d.points[i] === null && value !== null;
     const min = 0;
     const max = TOTAL;
     return h('li', null,
@@ -376,7 +378,7 @@ function renderRoundEntry(g) {
       h('div', { class: 'stepper' },
         h('button', { class: 'step', type: 'button', 'aria-label': `Resta 1 a ${name}`, disabled: value !== null && value <= min, onclick: () => bump(i, -1) }, '−1'),
         h('input', {
-          class: `points${isAuto ? ' is-auto' : ''}${isAuto && autoBad ? ' bad' : ''}`,
+          class: `points${isCalc ? ' is-auto' : ''}${isAuto && autoBad ? ' bad' : ''}`,
           type: 'text', inputmode: 'numeric', pattern: '[0-9]*', id: `points-${i}`,
           autocomplete: 'off', enterkeyhint: 'next',
           value: value === null ? '' : String(value),
@@ -481,7 +483,17 @@ function renderHistory() {
 
   return h('div', null,
     masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go(state.game ? 'game' : 'setup') }, state.game ? 'Torna a la partida' : 'Inici')),
-    section('Partides anteriors', state.games.length ? `${state.games.length}` : null, list),
+    section('Partides anteriors', state.games.length ? `${state.games.length}` : null, list,
+      state.games.length ? h('div', { class: 'actions end' }, h('button', {
+        class: 'btn quiet danger', type: 'button',
+        onclick: () => {
+          if (!confirm(`Vols esborrar ${state.games.length === 1 ? 'la partida' : `les ${state.games.length} partides`} de l'historial? Només s'esborren d'aquest mòbil, i no es poden recuperar.`)) return;
+          setState(st => { st.games = []; st.viewing = null; });
+          toast('Historial esborrat');
+        },
+      }, 'Esborra tot l\'historial')) : null,
+      state.games.length ? h('p', { class: 'note' }, 'Per esborrar-ne només una, obre-la i baixa fins al final.') : null,
+    ),
     section('T\'han enviat una partida?', null, renderPaste()),
   );
 }
@@ -560,7 +572,7 @@ function renderDetail() {
       h('button', {
         class: 'btn quiet danger', type: 'button',
         onclick: () => {
-          if (!confirm('Vols esborrar aquesta partida de l\'historial?')) return;
+          if (!confirm('Vols esborrar aquesta partida? Només s\'esborra d\'aquest mòbil.')) return;
           setState(st => { st.games = st.games.filter(x => x.id !== g.id); st.viewing = null; });
           go('history');
         },

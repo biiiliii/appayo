@@ -103,3 +103,23 @@ test('createGame', () => {
   assert.equal(createGame(['A', 'B', 'C', 'D'], 'players').roundsPlanned, 4);
   assert.equal(createGame(['A', 'B', 'C'], null).roundsPlanned, null);
 });
+
+test('players left blank count as 0 once the 250 are already given out', () => {
+  const r = resolveRound({ papayoo: 1, points: [null, 100, 150, null] });
+  assert.equal(r.valid, true);
+  assert.deepEqual(r.points, [0, 100, 150, 0]);
+  assert.equal(r.auto, null);
+  assert.deepEqual(r.errors, []);
+});
+
+test('one player can take all 250 and the rest stay blank', () => {
+  const r = resolveRound({ papayoo: 0, points: [250, null, null] });
+  assert.equal(r.valid, true);
+  assert.deepEqual(r.points, [250, 0, 0]);
+});
+
+test('blank players stay blank while points are still left to give out', () => {
+  const r = resolveRound({ papayoo: 0, points: [100, null, null, 20] });
+  assert.equal(r.valid, false);
+  assert.deepEqual(r.points, [100, null, null, 20]);
+});
