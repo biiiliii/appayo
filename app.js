@@ -33,6 +33,7 @@ const state = Object.assign({
   draft: null,
   games: [],      // partides acabades, la més recent primer
   viewing: null,  // id de la partida de l'historial que s'està mirant
+  edit: null,     // ronda que s'està arreglant: { gameId (null = la partida en curs), round, draft, back }
 }, load() ?? {});
 
 // Partida rebuda per un enllaç: només viu mentre es mira, no es desa fins que es diu.
@@ -162,7 +163,7 @@ function leaveShared() {
 function render() {
   const active = document.activeElement;
   const focusId = active && active.id ? active.id : null;
-  const screens = { setup: renderSetup, game: renderGame, history: renderHistory, detail: renderDetail, shared: renderShared };
+  const screens = { setup: renderSetup, game: renderGame, history: renderHistory, detail: renderDetail, shared: renderShared, edit: renderEdit };
   const fn = (state.screen === 'game' && !state.game) ? renderSetup : (screens[state.screen] || renderSetup);
   root.replaceChildren(fn());
   if (focusId) {
@@ -287,9 +288,9 @@ function renderGame() {
     masthead(context),
     finished ? renderWinner(g) : null,
     renderStandings(g, finished),
-    finished ? null : renderRoundEntry(g),
+    finished ? null : newRoundEntry(g),
     g.rounds.length >= 1 ? section('Com ha anat', 'acumulat, menys és millor', renderChart(g.players, g.rounds), legend(g.players)) : null,
-    g.rounds.length ? section('Ronda a ronda', null, renderRoundsTable(g)) : null,
+    g.rounds.length ? section('Ronda a ronda', null, renderRoundsTable(g, ri => startEdit(null, ri, 'game'))) : null,
     h('div', { class: 'actions center' },
       finished ? h('button', { class: 'btn outline', type: 'button', onclick: () => setState(st => { st.game.roundsPlanned += 1; }) }, 'Juga una ronda més') : null,
       finished ? h('button', { class: 'btn', type: 'button', onclick: () => { setState(archiveCurrentGame); go('setup'); } }, 'Desa la partida a l\'historial') : null,
@@ -339,15 +340,19 @@ function renderStandings(g, finished) {
   );
 }
 
-function renderRoundEntry(g) {
-  const d = state.draft;
-  const n = g.players.length;
+/**
+ * Formulari per posar els punts d'una ronda.
+ * @param opts.pick  on viu l'esborrany dins de l'estat (la ronda nova o la que s'arregla)
+ */
+function renderRoundEntry(g, opts) {
+  const { pick, title, submitLabel, onSubmit, note, extra } = opts;
+  const d = pick(state);
   const res = resolveRound(d);
   const missing = d.points.filter(p => p === null).length;
   const autoBad = res.auto !== null && res.errors.includes('over-total');
 
   const setPoints = (i, value) => setState(st => {
-    st.draft.points[i] = value === null ? null : clampPoints(value);
+    pick(st).points[i] = value === null ? null : clampPoints(value);
   });
   // Els que no s'han tocat mostren el que els toca: la resta, o 0 si ja estan repartits els 250.
   const displayValue = (i) => (d.points[i] !== null ? d.points[i] : res.points[i]);
@@ -356,7 +361,7 @@ function renderRoundEntry(g) {
   const holder = h('div', { class: 'holder', role: 'group', 'aria-label': 'Qui té el Papayoo' },
     g.players.map((name, i) => h('button', {
       type: 'button', 'aria-pressed': String(d.papayoo === i),
-      onclick: () => setState(st => { st.draft.papayoo = i; }),
+      onclick: () => setState(st => { pick(st).papayoo = i; }),
     }, pcard(), name)),
   );
 
@@ -421,7 +426,8 @@ function renderRoundEntry(g) {
   const firstError = res.errors.find(e => e !== 'papayoo-missing') ?? (missing <= 1 ? res.errors[0] : null);
 
   return h('section', { class: 'section', id: 'round-entry' },
-    h('h2', { class: 'section-title' }, `Ronda ${g.rounds.length + 1}`),
+    h('h2', { class: 'section-title' }, title),
+    note ? h('p', { class: 'note edit-note' }, note) : null,
     h('p', { class: 'lede' }, 'Qui s\'ha endut el Papayoo?'),
     holder,
     d.papayoo === null ? h('p', { class: 'note' }, `Sempre se l'endú algú. Només és per recordar-ho: els seus ${PAPAYOO_POINTS} punts ja van dins del total del jugador.`) : null,
@@ -434,36 +440,52 @@ function renderRoundEntry(g) {
     h('button', {
       class: 'btn block', type: 'button', disabled: !res.valid,
       onclick: () => {
-        const final = resolveRound(state.draft);
+        const draft = pick(state);
+        const final = resolveRound(draft);
         if (!final.valid) return;
-        setState(st => {
-          st.game.rounds.push({ papayoo: st.draft.papayoo, points: final.points.slice() });
-          st.draft = emptyDraft(n);
-        });
+        onSubmit({ papayoo: draft.papayoo, points: final.points.slice() });
         window.scrollTo(0, 0);
       },
-    }, 'Desa la ronda'),
+    }, submitLabel),
+    extra ?? null,
   );
+}
+
+function newRoundEntry(g) {
+  const n = g.players.length;
+  return renderRoundEntry(g, {
+    pick: st => st.draft,
+    title: `Ronda ${g.rounds.length + 1}`,
+    submitLabel: 'Desa la ronda',
+    onSubmit: (round) => setState(st => {
+      st.game.rounds.push(round);
+      st.draft = emptyDraft(n);
+    }),
+  });
 }
 
 function legend(players) {
   return h('ul', { class: 'legend' }, players.map((p, i) => h('li', null, dot(i), p)));
 }
 
-function renderRoundsTable(g) {
+/** @param onEdit  si hi és, tocar una ronda l'obre per arreglar-la */
+function renderRoundsTable(g, onEdit) {
   const tot = standings(g.players, g.rounds).sort((a, b) => a.index - b.index).map(r => r.total);
   return h('div', null,
     h('div', { class: 'scroll-x' },
       h('table', { class: 'rounds' },
         h('thead', null, h('tr', null, h('th', null, 'Ronda'), g.players.map((p, i) => h('th', { title: p }, h('span', { class: 'th-name' }, dot(i, 13), p))))),
-        h('tbody', null, g.rounds.map((r, ri) => h('tr', null,
-          h('td', null, ri + 1),
+        h('tbody', null, g.rounds.map((r, ri) => h('tr', onEdit ? { class: 'editable', onclick: () => onEdit(ri) } : null,
+          h('td', null, onEdit
+            ? h('button', { class: 'fix', type: 'button', 'aria-label': `Arregla la ronda ${ri + 1}` }, ri + 1, h('span', { 'aria-hidden': 'true' }, ' ›'))
+            : ri + 1),
           r.points.map((p, i) => h('td', { class: r.papayoo === i ? 'pap' : null }, p)),
         ))),
         h('tfoot', null, h('tr', null, h('td', null, 'Total'), tot.map(t => h('td', null, t)))),
       ),
     ),
     h('p', { class: 'note legend-note' }, pcard(), 'En color: qui tenia el Papayoo aquella ronda.'),
+    onEdit ? h('p', { class: 'note' }, 'Si hi ha algun error, toca la ronda per arreglar-la.') : null,
   );
 }
 
@@ -540,7 +562,7 @@ function openPasted() {
 }
 
 /** Una partida acabada de dalt a baix: guanyador, classificació, gràfica i taula. */
-function gameReport(g, lead) {
+function gameReport(g, lead, onEdit) {
   const rows = standings(g.players, g.rounds);
   const winners = rows.filter(r => r.rank === 1).map(r => r.name);
   return [
@@ -557,7 +579,7 @@ function gameReport(g, lead) {
       ))),
     ),
     section('Com va anar', 'acumulat, menys és millor', renderChart(g.players, g.rounds), legend(g.players)),
-    section('Ronda a ronda', null, renderRoundsTable(g)),
+    section('Ronda a ronda', null, renderRoundsTable(g, onEdit)),
   ];
 }
 
@@ -566,7 +588,7 @@ function renderDetail() {
   if (!g) return renderHistory();
   return h('div', null,
     masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('history') }, 'Partides anteriors')),
-    gameReport(g, `${fmtDate(g.endedAt)}, ${fmtRounds(g.rounds.length)}`),
+    gameReport(g, `${fmtDate(g.endedAt)}, ${fmtRounds(g.rounds.length)}`, ri => startEdit(g.id, ri, 'detail')),
     h('div', { class: 'actions center' },
       shareButton(g),
       h('button', {
@@ -578,6 +600,48 @@ function renderDetail() {
         },
       }, 'Esborra aquesta partida'),
     ),
+  );
+}
+
+// ---------- Arreglar una ronda ----------
+const editTarget = (st) => (st.edit?.gameId ? st.games.find(x => x.id === st.edit.gameId) : st.game);
+
+function startEdit(gameId, round, back) {
+  const g = gameId ? state.games.find(x => x.id === gameId) : state.game;
+  const r = g.rounds[round];
+  go('edit', { edit: { gameId, round, back, draft: { papayoo: r.papayoo, points: r.points.slice() } } });
+}
+
+function leaveEdit() {
+  const back = state.edit?.back ?? 'game';
+  go(back, { edit: null });
+}
+
+function renderEdit() {
+  const e = state.edit;
+  const g = e && editTarget(state);
+  if (!g || !g.rounds[e.round]) { state.screen = state.game ? 'game' : 'setup'; state.edit = null; return (state.game ? renderGame : renderSetup)(); }
+  const original = g.rounds[e.round];
+  const changed = e.draft.papayoo !== original.papayoo || e.draft.points.some((p, i) => p !== original.points[i]);
+  const cancel = () => {
+    if (changed && !confirm('Vols deixar-ho estar? Els canvis d\'aquesta ronda no es desaran.')) return;
+    leaveEdit();
+  };
+
+  return h('div', null,
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: cancel }, e.gameId ? 'Torna a la partida desada' : 'Torna a la partida')),
+    renderRoundEntry(g, {
+      pick: st => st.edit.draft,
+      title: `Arreglant la ronda ${e.round + 1}`,
+      note: 'Canvia el que estigui malament. Si treus punts a algú, toca la × d\'un altre jugador perquè es quedi la resta.',
+      submitLabel: 'Desa els canvis',
+      onSubmit: (round) => {
+        setState(st => { editTarget(st).rounds[st.edit.round] = round; });
+        leaveEdit();
+        toast(`Ronda ${e.round + 1} arreglada`);
+      },
+      extra: h('div', { class: 'actions center' }, h('button', { class: 'btn quiet', type: 'button', onclick: cancel }, 'Deixa-ho estar')),
+    }),
   );
 }
 

@@ -1,4 +1,4 @@
-const CACHE = 'appayo-v5';
+const CACHE = 'appayo-v6';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './logic.js', './chart.js', './symbols.js', './share.js', './fonts/BricolageGrotesque.woff2',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png',

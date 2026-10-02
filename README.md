@@ -12,6 +12,9 @@ instal·lable a la pantalla d'inici i que funciona sense connexió.
    tocar-lo: un cop repartits els 250 punts, els que s'han deixat en blanc compten 0.
 5. Desa la ronda. Guanya qui té menys punts.
 6. Durant la partida hi ha la classificació, una gràfica de l'evolució dels punts i la taula ronda a ronda.
+   Si hi ha un error en una ronda ja desada, es toca a la taula "Ronda a ronda" i s'arregla
+   (també a les partides de l'historial). La partida es desa a cada tecla: si es tanca l'app o
+   s'apaga el mòbil, en tornar-la a obrir continua on era.
 7. Les partides acabades queden a "Partides anteriors" (al mateix mòbil), amb classificació, gràfica i taula.
    Cadascú pot esborrar-ne una (obrint-la) o tot l'historial; només s'esborra del seu mòbil.
 8. Amb "Comparteix la partida" s'envia per WhatsApp (o el que sigui) un resum amb qui guanya i un
