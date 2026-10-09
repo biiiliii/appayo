@@ -283,6 +283,41 @@ button { cursor: pointer; }
   border-radius: var(--r-s); z-index: 10;
 }
 
+/* ---- Torneig ---- */
+.field { border-bottom: 1px solid var(--rule); }
+.paste.names { min-height: 220px; font-size: 17px; line-height: 1.5; }
+.tables { list-style: none; margin: 0; padding: 0; }
+.tables li { padding: 12px 0 14px; border-bottom: 1px solid var(--rule); }
+.tables li:last-child { border-bottom: 0; }
+.thead { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
+.thead b { font-size: 18px; font-weight: 800; font-stretch: 90%; letter-spacing: -.01em; }
+.tstatus { font-size: 14.5px; font-weight: 600; color: var(--muted); text-align: right; }
+.tstatus.ok { color: var(--green-deep); }
+.tnames { margin: 4px 0 0; color: var(--ink-2); font-size: 16px; }
+.tactions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.tactions:empty { display: none; }
+.seats { list-style: none; margin: 0; padding: 0; }
+.seats li { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--rule); font-size: 19px; font-weight: 600; }
+.seats li:last-child { border-bottom: 0; }
+
+.rounds.tstand th.name, .rounds.tstand td.name { text-align: left; color: var(--ink); font-weight: 600; white-space: normal; min-width: 8em; }
+.rounds.tstand th.name { color: var(--ink-2); }
+.rounds.tstand td:first-child { width: 2.2em; }
+.rounds.tstand td.total { font-weight: 800; font-size: 17px; }
+.rounds.tstand tr.first td.total, .rounds.tstand tr.first td.name { color: var(--green); }
+
+.diplomas { list-style: none; margin: 0; padding: 0; }
+.diplomas li {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 4px 16px; align-items: baseline;
+  padding: 12px 0; border-bottom: 1px solid var(--rule);
+}
+.diplomas li:last-child { border-bottom: 0; }
+.diplomas .dtitle b { display: block; font-size: 17px; font-weight: 800; font-stretch: 90%; }
+.diplomas .dtitle small, .diplomas .dwho small { display: block; color: var(--muted); font-size: 13.5px; }
+.diplomas .dwho { text-align: right; }
+.diplomas .dwho span { font-size: 18px; font-weight: 700; color: var(--green); }
+.diplomas li:first-child .dwho span { font-size: 22px; font-weight: 800; font-stretch: 90%; }
+
 @media (max-width: 380px) {
   .stepper { grid-template-columns: 52px 1fr 52px; }
   .points { font-size: 28px; }

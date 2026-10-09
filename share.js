@@ -4,16 +4,16 @@ import { TOTAL, MIN_PLAYERS, MAX_PLAYERS, standings } from './logic.js';
 
 const VERSION = 1;
 
-const toBase64Url = (bytes) => btoa(String.fromCharCode(...bytes))
+export const toBase64Url = (bytes) => btoa(String.fromCharCode(...bytes))
   .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-function fromBase64Url(text) {
+export function fromBase64Url(text) {
   const b64 = text.replace(/-/g, '+').replace(/_/g, '/');
   const bin = atob(b64 + '='.repeat((4 - b64.length % 4) % 4));
   return Uint8Array.from(bin, (c) => c.charCodeAt(0));
 }
 
-/** La partida, compactada: [papayoo, punts...] per ronda. */
+/** La partida, compactada: [papayoo, punts...] per ronda. Si és d'un torneig, porta de quina taula és. */
 export function encodeGame(game) {
   const payload = {
     v: VERSION,
@@ -22,7 +22,18 @@ export function encodeGame(game) {
     p: game.players,
     r: game.rounds.map(r => [r.papayoo, ...r.points]),
   };
+  if (game.tour) payload.t = [game.tour.id, game.tour.game, game.tour.table, game.tour.name ?? ''];
   return toBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
+}
+
+/** L'etiqueta de torneig d'una partida: [id, partida, taula, nom del torneig]. */
+export function readTour(t) {
+  if (!Array.isArray(t) || t.length !== 4) return null;
+  const [id, game, table, name] = t;
+  if (typeof id !== 'string' || !/^[a-z0-9]{1,16}$/.test(id)) return null;
+  if (!isInt(game) || game < 0 || game > 19 || !isInt(table) || table < 0 || table > 49) return null;
+  if (typeof name !== 'string' || name.length > 60) return null;
+  return { id, name, game, table };
 }
 
 const fail = (error) => ({ ok: false, error });
@@ -62,7 +73,13 @@ export function decodeShared(text) {
     rounds.push({ papayoo, points });
   }
 
-  return { ok: true, game: { players: players.slice(), rounds, createdAt: data.c, endedAt: data.e } };
+  const game = { players: players.slice(), rounds, createdAt: data.c, endedAt: data.e };
+  if (data.t !== undefined) {
+    const tour = readTour(data.t);
+    if (!tour) return fail('bad-data');
+    game.tour = tour;
+  }
+  return { ok: true, game };
 }
 
 /** L'enllaç per enviar: la mateixa adreça de l'app amb la partida darrere del #. */

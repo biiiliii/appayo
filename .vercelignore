@@ -1,0 +1,4 @@
+*.xlsx
+.playwright-mcp/
+test/
+docs/

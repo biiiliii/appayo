@@ -5,6 +5,12 @@ import {
 import { renderChart, seriesColor } from './chart.js';
 import { symbolEl } from './symbols.js';
 import { decodeShared, shareLink, shareMessage, gameKey } from './share.js';
+import {
+  MAX_TOURNAMENT_PLAYERS, tableSizes, makeSchedule, countRepeats, parseNames, validateTournament, createTournament,
+  tableNames, decodeInvite, inviteLink, inviteMessage, resultMessage, tableResult, acceptResult, resultKey,
+  progress, needsScaling, tournamentStandings, awards, fmtAward, standingsMessage, fmtPoints, joinNames,
+  tournamentTitle, tableLabel,
+} from './tournament.js';
 
 const STORAGE_KEY = 'appayo:v1';
 const root = document.getElementById('app');
@@ -34,6 +40,10 @@ const state = Object.assign({
   games: [],      // partides acabades, la més recent primer
   viewing: null,  // id de la partida de l'historial que s'està mirant
   edit: null,     // ronda que s'està arreglant: { gameId (null = la partida en curs), round, draft, back }
+  tsetup: { name: '', text: '', games: 3, rounds: 5, draw: null }, // torneig a punt de començar
+  tournaments: [], // tornejos que organitza aquest mòbil, el més recent primer
+  tid: null,       // torneig obert
+  tview: null,     // resultat d'una taula que s'està mirant: { game, table }
 }, load() ?? {});
 
 // Partida rebuda per un enllaç: només viu mentre es mira, no es desa fins que es diu.
@@ -42,6 +52,9 @@ let incomingError = null;
 let pasting = false;
 let pasteError = null;
 let pasteText = '';
+// Invitació d'una taula del torneig rebuda per un enllaç (#t=...).
+let invite = null;
+let inviteError = null;
 
 function load() {
   try {
@@ -66,7 +79,8 @@ function archiveCurrentGame(st) {
     st.games.unshift({ ...g, id: `${g.createdAt}-${Math.random().toString(36).slice(2, 7)}`, endedAt: Date.now() });
     st.games = st.games.slice(0, 100);
   }
-  if (g) { st.setup.names = g.players.slice(); st.setup.roundsPlanned = g.roundsPlanned; }
+  // Les d'un torneig no canvien els noms de l'inici: són els de la taula que ha tocat.
+  if (g && !g.tour) { st.setup.names = g.players.slice(); st.setup.roundsPlanned = g.roundsPlanned; }
   st.game = null;
   st.draft = null;
 }
@@ -107,8 +121,13 @@ function toast(message) {
 const clearHash = () => history.replaceState(null, '', location.pathname + location.search);
 
 function shareGame(g) {
-  const snapshot = { players: g.players, rounds: g.rounds, createdAt: g.createdAt, endedAt: g.endedAt ?? Date.now() };
-  const text = shareMessage(snapshot, shareLink(snapshot, location.href));
+  const snapshot = { players: g.players, rounds: g.rounds, createdAt: g.createdAt, endedAt: g.endedAt ?? Date.now(), tour: g.tour };
+  const link = shareLink(snapshot, location.href);
+  shareText(g.tour ? resultMessage(snapshot, link) : shareMessage(snapshot, link));
+}
+
+/** El menú de compartir del mòbil (WhatsApp...), o copiar el text si no n'hi ha. */
+function shareText(text) {
   if (navigator.share) {
     // Si tanquen el menú de compartir no cal dir-los res.
     navigator.share({ text }).catch(() => {});
@@ -119,15 +138,28 @@ function shareGame(g) {
   else toast('Aquest navegador no pot compartir la partida');
 }
 
-const shareButton = (g) => h('button', { class: 'btn outline', type: 'button', onclick: () => shareGame(g) }, 'Comparteix la partida');
+const shareButton = (g) => (g.tour
+  ? h('button', { class: 'btn', type: 'button', onclick: () => shareGame(g) }, 'Envia el resultat a l\'organitzador')
+  : h('button', { class: 'btn outline', type: 'button', onclick: () => shareGame(g) }, 'Comparteix la partida'));
 
-/** Llegeix una partida de l'adreça (#p=...). Retorna si l'adreça en portava cap. */
+/** Llegeix una partida (#p=...) o una invitació de torneig (#t=...) de l'adreça. Retorna la pantalla, o null. */
 function readHash() {
-  if (!/[#&?]p=/.test(location.hash)) return false;
-  const read = decodeShared(location.hash);
-  incoming = read.ok ? read.game : null;
-  incomingError = read.ok ? null : read.error;
-  return true;
+  return readLink(location.hash);
+}
+function readLink(text) {
+  if (/[#&?]t=/.test(text)) {
+    const read = decodeInvite(text);
+    invite = read.ok ? read.invite : null;
+    inviteError = read.ok ? null : read.error;
+    return 'invite';
+  }
+  if (/[#&?]p=/.test(text)) {
+    const read = decodeShared(text);
+    incoming = read.ok ? read.game : null;
+    incomingError = read.ok ? null : read.error;
+    return 'shared';
+  }
+  return null;
 }
 
 function saveIncoming(g) {
@@ -163,7 +195,10 @@ function leaveShared() {
 function render() {
   const active = document.activeElement;
   const focusId = active && active.id ? active.id : null;
-  const screens = { setup: renderSetup, game: renderGame, history: renderHistory, detail: renderDetail, shared: renderShared, edit: renderEdit };
+  const screens = {
+    setup: renderSetup, game: renderGame, history: renderHistory, detail: renderDetail, shared: renderShared, edit: renderEdit,
+    tsetup: renderTSetup, tdraw: renderTDraw, tournament: renderTournament, tstandings: renderTStandings, tresult: renderTResult, invite: renderInvite,
+  };
   const fn = (state.screen === 'game' && !state.game) ? renderSetup : (screens[state.screen] || renderSetup);
   root.replaceChildren(fn());
   if (focusId) {
@@ -270,6 +305,7 @@ function renderSetup() {
         },
       }, state.game ? 'Comença una altra partida' : 'Comença la partida'),
     ),
+    renderTournamentList(),
   );
 }
 
@@ -286,15 +322,17 @@ function renderGame() {
 
   return h('div', null,
     masthead(context),
+    g.tour ? tourBanner(g.tour) : null,
     finished ? renderWinner(g) : null,
     renderStandings(g, finished),
     finished ? null : newRoundEntry(g),
     g.rounds.length >= 1 ? section('Com ha anat', 'acumulat, menys és millor', renderChart(g.players, g.rounds), legend(g.players)) : null,
     g.rounds.length ? section('Ronda a ronda', null, renderRoundsTable(g, ri => startEdit(null, ri, 'game'))) : null,
     h('div', { class: 'actions center' },
-      finished ? h('button', { class: 'btn outline', type: 'button', onclick: () => setState(st => { st.game.roundsPlanned += 1; }) }, 'Juga una ronda més') : null,
-      finished ? h('button', { class: 'btn', type: 'button', onclick: () => { setState(archiveCurrentGame); go('setup'); } }, 'Desa la partida a l\'historial') : null,
-      finished ? shareButton(g) : null,
+      finished && g.tour ? tourGameActions(g) : null,
+      finished && !g.tour ? h('button', { class: 'btn outline', type: 'button', onclick: () => setState(st => { st.game.roundsPlanned += 1; }) }, 'Juga una ronda més') : null,
+      finished ? h('button', { class: g.tour ? 'btn outline' : 'btn', type: 'button', onclick: () => { setState(archiveCurrentGame); go('setup'); } }, 'Desa la partida a l\'historial') : null,
+      finished && !g.tour ? shareButton(g) : null,
       g.rounds.length ? h('button', {
         class: 'btn quiet', type: 'button',
         onclick: () => {
@@ -521,14 +559,14 @@ function renderHistory() {
 }
 
 /** Per a qui rep l'enllaç i no se li obre l'app (als iPhone passa): copiar-lo i enganxar-lo aquí. */
-function renderPaste() {
+function renderPaste(note = 'Copia el missatge o l\'enllaç del WhatsApp i enganxa\'l aquí per veure la partida.') {
   if (!pasting) {
     return h('div', null,
       h('button', {
         class: 'btn outline block', type: 'button',
         onclick: () => { pasting = true; pasteError = null; render(); },
       }, 'Enganxa l\'enllaç que t\'han enviat'),
-      h('p', { class: 'note' }, 'Copia el missatge o l\'enllaç del WhatsApp i enganxa\'l aquí per veure la partida.'),
+      h('p', { class: 'note' }, note),
     );
   }
   return h('div', null,
@@ -536,29 +574,28 @@ function renderPaste() {
       class: 'paste', id: 'paste-field', rows: 3, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
       placeholder: 'Enganxa aquí el missatge o l\'enllaç',
       'aria-label': 'Enllaç de la partida',
-      value: pasteText,
       oninput: (e) => { pasteText = e.target.value; },
-    }),
+    }, pasteText),
     pasteError ? h('p', { class: 'error' }, SHARE_ERROR_TEXT[pasteError] ?? SHARE_ERROR_TEXT['bad-link']) : null,
     h('div', { class: 'actions end' },
       h('button', {
         class: 'btn quiet', type: 'button',
         onclick: () => { pasting = false; pasteError = null; pasteText = ''; render(); },
       }, 'Deixa-ho estar'),
-      h('button', { class: 'btn', type: 'button', onclick: openPasted }, 'Obre la partida'),
+      h('button', { class: 'btn', type: 'button', onclick: openPasted }, 'Obre l\'enllaç'),
     ),
   );
 }
 
 function openPasted() {
-  const read = decodeShared(pasteText);
+  const isInvite = /[#&?]t=/.test(pasteText);
+  const read = isInvite ? decodeInvite(pasteText) : decodeShared(pasteText);
   if (!read.ok) { pasteError = read.error; render(); return; }
-  incoming = read.game;
-  incomingError = null;
+  readLink(pasteText);
   pasting = false;
   pasteError = null;
   pasteText = '';
-  go('shared');
+  go(isInvite ? 'invite' : 'shared');
 }
 
 /** Una partida acabada de dalt a baix: guanyador, classificació, gràfica i taula. */
@@ -588,9 +625,10 @@ function renderDetail() {
   if (!g) return renderHistory();
   return h('div', null,
     masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('history') }, 'Partides anteriors')),
+    g.tour ? tourBanner(g.tour) : null,
     gameReport(g, `${fmtDate(g.endedAt)}, ${fmtRounds(g.rounds.length)}`, ri => startEdit(g.id, ri, 'detail')),
     h('div', { class: 'actions center' },
-      shareButton(g),
+      g.tour ? tourGameActions(g) : shareButton(g),
       h('button', {
         class: 'btn quiet danger', type: 'button',
         onclick: () => {
@@ -660,6 +698,7 @@ function renderShared() {
   }
   const g = incoming;
   if (!g) return renderSetup();
+  if (g.tour) return renderSharedResult(g, back);
   const already = state.games.some(x => gameKey(x) === gameKey(g));
 
   return h('div', null,
@@ -674,14 +713,453 @@ function renderShared() {
   );
 }
 
+// ---------- Torneig ----------
+const T_ERROR_TEXT = {
+  'too-few': `Calen com a mínim ${MIN_PLAYERS} jugadors.`,
+  'too-many': `Com a màxim ${MAX_TOURNAMENT_PLAYERS} jugadors.`,
+  'name-too-long': 'Hi ha un nom molt llarg. Potser hi falta un salt de línia: cada jugador ha d\'anar en una línia.',
+  'duplicate-name': 'Hi ha noms repetits',
+};
+const RESULT_ERROR_TEXT = {
+  'other-tournament': 'Aquest resultat és d\'un altre torneig.',
+  'bad-table': 'Aquesta taula no és al torneig. Potser és d\'un sorteig anterior que es va tornar a fer.',
+  'other-players': 'Els jugadors d\'aquest resultat no són els que toquen a aquesta taula. Potser és d\'un sorteig anterior.',
+};
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const findTournament = (id) => state.tournaments.find(t => t.id === id) ?? null;
+const currentTournament = () => findTournament(state.tid);
+const sameTable = (a, b) => a && b && a.id === b.id && a.game === b.game && a.table === b.table;
+const inviteFor = (t, game, table) => ({ id: t.id, name: t.name, game, table, players: tableNames(t, game, table), rounds: t.rounds });
+
+/** "6 taules de 5", "4 taules de 5 i 2 de 4" */
+function sizesText(n) {
+  const sizes = tableSizes(n);
+  if (sizes.length === 1) return `una sola taula de ${n}`;
+  const counts = new Map();
+  for (const size of sizes) counts.set(size, (counts.get(size) ?? 0) + 1);
+  const parts = [...counts].sort((a, b) => b[0] - a[0])
+    .map(([size, c], i) => (i === 0 ? `${plural(c, 'taula', 'taules')} de ${size}` : `${c} de ${size}`));
+  return joinNames(parts);
+}
+
+/** De quin torneig i taula és la partida que es mira. */
+function tourBanner(tour) {
+  return h('p', { class: 'received' }, `${tour.name || 'Torneig de Papayoo'}: ${tableLabel(tour.game, tour.table).toLowerCase()}`);
+}
+
+function renderTournamentList() {
+  const list = state.tournaments.length ? h('ul', { class: 'games' }, state.tournaments.map(t => {
+    const p = progress(t);
+    const done = p.received === p.total;
+    return h('li', null, h('button', { type: 'button', onclick: () => go('tournament', { tid: t.id }) },
+      h('span', { class: 'when' }, `${fmtDate(t.createdAt)}, ${t.players.length} jugadors`),
+      h('span', { class: 'who' }, tournamentTitle(t)),
+      h('span', { class: 'won' }, done ? 'Acabat' : `${p.received} de ${p.total}`, h('small', null, done ? 'totes les taules' : 'taules rebudes')),
+    ));
+  })) : h('p', { class: 'lede' }, 'Per jugar a moltes taules alhora. L\'app fa les taules, cada taula apunta els seus punts al seu mòbil i aquí es veu la classificació de tothom.');
+  return section('Tornejos', null,
+    list,
+    h('div', { class: 'actions' }, h('button', { class: 'btn outline block', type: 'button', onclick: () => go('tsetup') }, 'Organitza un torneig')),
+  );
+}
+
+// ---- Preparar el torneig: inscrits i format ----
+function renderTSetup() {
+  const s = state.tsetup;
+  const errorBox = h('p', { class: 'error', hidden: true });
+  const count = h('p', { class: 'note', 'aria-live': 'polite' });
+  const updateCount = () => {
+    const n = parseNames(s.text).length;
+    count.textContent = n === 0 ? 'Encara no hi ha cap nom.'
+      : n < MIN_PLAYERS ? `${plural(n, 'jugador', 'jugadors')}.`
+        : `${n} jugadors: ${sizesText(n)}.`;
+  };
+  updateCount();
+
+  const choices = (options, current, set, label) => h('div', { class: 'choices' }, options.map(n => h('button', {
+    class: 'choice', type: 'button', 'aria-pressed': String(current === n),
+    onclick: () => setState(st => set(st.tsetup, n)),
+  }, label ? label(n) : n)));
+
+  const draw = () => {
+    const players = parseNames(s.text);
+    const errors = validateTournament(players);
+    if (errors.length) {
+      let message = T_ERROR_TEXT[errors[0]];
+      if (errors[0] === 'duplicate-name') {
+        const first = new Map();
+        const dups = new Set();
+        for (const p of players) { const k = p.toLowerCase(); if (first.has(k)) dups.add(first.get(k)); else first.set(k, p); }
+        message = `${message}: ${joinNames([...dups])}. Afegeix-hi el cognom o una inicial.`;
+      }
+      errorBox.textContent = message;
+      errorBox.hidden = false;
+      return;
+    }
+    setState(st => {
+      st.tsetup.draw = { players, schedule: makeSchedule(players.length, s.games), games: s.games, rounds: s.rounds, name: s.name.trim() };
+      st.screen = 'tdraw';
+    });
+    window.scrollTo(0, 0);
+  };
+
+  return h('div', null,
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('setup') }, 'Inici')),
+    section('Qui juga al torneig?', null,
+      h('p', { class: 'lede' }, 'Escriu o enganxa els noms, un per línia. Es poden copiar d\'una llista del WhatsApp.'),
+      h('textarea', {
+        class: 'paste names', id: 'tnames', rows: 10, autocomplete: 'off', autocapitalize: 'words', spellcheck: 'false',
+        placeholder: 'Núria Puig\nMercè Vila\nJoan Roca\n…',
+        'aria-label': 'Noms dels jugadors, un per línia',
+        oninput: (e) => { s.text = e.target.value; save(); updateCount(); errorBox.hidden = true; },
+      }, s.text),
+      count,
+    ),
+    section('Nom del torneig', 'si vols',
+      h('div', { class: 'field' }, h('input', {
+        class: 'text', type: 'text', id: 'tname', value: s.name, maxlength: 60, autocomplete: 'off', autocapitalize: 'sentences',
+        placeholder: 'Torneig de Papayoo', 'aria-label': 'Nom del torneig',
+        oninput: (e) => { s.name = e.target.value; save(); },
+      })),
+    ),
+    section('Quantes partides?', null,
+      choices([1, 2, 3, 4, 5], s.games, (ts, n) => { ts.games = n; }),
+      h('p', { class: 'note' }, 'A cada partida les taules canvien, perquè tothom jugui amb gent diferent.'),
+    ),
+    section('Quantes rondes a cada partida?', null,
+      choices([3, 4, 5, 6, 8, 10], s.rounds, (ts, n) => { ts.rounds = n; }),
+    ),
+    h('section', { class: 'section' },
+      errorBox,
+      h('button', { class: 'btn block', type: 'button', onclick: draw }, 'Fes el sorteig'),
+    ),
+  );
+}
+
+// ---- El sorteig, abans de començar ----
+function renderTDraw() {
+  const d = state.tsetup.draw;
+  if (!d) return renderTSetup();
+  const repeats = countRepeats(d.schedule);
+  const redraw = () => setState(st => { st.tsetup.draw.schedule = makeSchedule(d.players.length, d.games); });
+  const start = () => {
+    const t = createTournament(d);
+    setState(st => {
+      st.tournaments.unshift(t);
+      st.tid = t.id;
+      st.tsetup = { name: '', text: '', games: d.games, rounds: d.rounds, draw: null };
+      st.screen = 'tournament';
+    });
+    window.scrollTo(0, 0);
+  };
+  const actions = () => h('div', { class: 'actions center' },
+    h('button', { class: 'btn outline', type: 'button', onclick: redraw }, 'Torna a sortejar'),
+    h('button', { class: 'btn', type: 'button', onclick: start }, 'Comença el torneig'),
+  );
+
+  return h('div', null,
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('tsetup') }, 'Canvia els jugadors')),
+    h('section', { class: 'winner' },
+      h('p', { class: 'lead' }, `${d.players.length} jugadors, ${plural(d.games, 'partida', 'partides')} de ${plural(d.rounds, 'ronda', 'rondes')}`),
+      h('p', { class: 'name' }, d.name || 'Torneig de Papayoo'),
+      h('p', { class: 'sub' }, repeats === 0
+        ? (d.games > 1 ? 'Ningú no repeteix company de taula.' : `Es juga a ${sizesText(d.players.length)}.`)
+        : `${repeats === 1 ? 'Una parella torna' : `${repeats} parelles tornen`} a coincidir a la mateixa taula. Amb tan pocs jugadors no es pot evitar del tot.`),
+    ),
+    actions(),
+    d.schedule.map((game, gi) => section(`Partida ${gi + 1}`, null,
+      h('ol', { class: 'tables' }, game.map((seats, ti) => h('li', null,
+        h('div', { class: 'thead' }, h('b', null, `Taula ${ti + 1}`), h('span', { class: 'tstatus' }, `${seats.length} jugadors`)),
+        h('p', { class: 'tnames' }, joinNames(seats.map(i => d.players[i]))),
+      ))),
+    )),
+    actions(),
+  );
+}
+
+// ---- El torneig en marxa (mòbil de l'organitzador) ----
+function sendInvite(t, game, table) {
+  shareText(inviteMessage(t, game, table, inviteLink(t, game, table, location.href)));
+  setState(st => {
+    const tt = findTournament(t.id);
+    tt.sent = { ...(tt.sent ?? {}), [resultKey(game, table)]: true };
+  });
+}
+
+function tableRow(t, gi, ti) {
+  const key = resultKey(gi, ti);
+  const res = t.results[key];
+  let status;
+  if (res) {
+    const winners = standings(res.players, res.rounds).filter(r => r.rank === 1).map(r => r.name);
+    const short = res.rounds.length < t.rounds ? ` (${res.rounds.length} de ${t.rounds} rondes)` : '';
+    status = h('span', { class: 'tstatus ok' }, `Guanya ${joinNames(winners)}${short}`);
+  } else {
+    status = h('span', { class: 'tstatus' }, t.sent?.[key] ? 'Enviada, pendent' : 'Pendent');
+  }
+  return h('li', null,
+    h('div', { class: 'thead' }, h('b', null, `Taula ${ti + 1}`), status),
+    h('p', { class: 'tnames' }, joinNames(tableNames(t, gi, ti))),
+    h('div', { class: 'tactions' }, res
+      ? h('button', { class: 'btn outline small', type: 'button', onclick: () => go('tresult', { tview: { game: gi, table: ti } }) }, 'Mira el resultat')
+      : [
+        h('button', { class: t.sent?.[key] ? 'btn quiet small' : 'btn outline small', type: 'button', onclick: () => sendInvite(t, gi, ti) }, t.sent?.[key] ? 'Torna a enviar' : 'Envia a la taula'),
+        h('button', { class: 'btn quiet small', type: 'button', onclick: () => startTourGame(inviteFor(t, gi, ti)) }, 'Apunta-la aquí'),
+      ]),
+  );
+}
+
+function renderTournament() {
+  const t = currentTournament();
+  if (!t) return renderSetup();
+  const p = progress(t);
+  const rows = tournamentStandings(t);
+  const top = rows.filter(r => r.played).slice(0, 3);
+  const done = p.received === p.total;
+
+  return h('div', null,
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('setup') }, 'Inici')),
+    h('section', { class: 'winner' },
+      h('p', { class: 'lead' }, `${fmtDate(t.createdAt)}, ${t.players.length} jugadors`),
+      h('p', { class: 'name' }, tournamentTitle(t)),
+      h('p', { class: 'sub' }, `${plural(t.games, 'partida', 'partides')} de ${plural(t.rounds, 'ronda', 'rondes')}. ${done ? 'Han arribat tots els resultats.' : `Resultats rebuts: ${p.received} de ${p.total} taules.`}`),
+    ),
+    section(done ? 'Com ha quedat' : 'Com anem?', top.length ? 'menys punts guanya' : null,
+      top.length
+        ? [
+          h('ol', { class: 'ledger' }, top.map(r => h('li', { class: r.rank === 1 ? 'first' : null },
+            h('span', { class: 'pos' }, `${r.rank}.`),
+            h('span', { class: 'who' }, h('span', null, r.name)),
+            h('span', { class: 'score' }, fmtPoints(r.total)),
+          ))),
+          h('button', { class: 'btn outline block', type: 'button', onclick: () => go('tstandings') }, 'Classificació sencera i diplomes'),
+        ]
+        : h('p', { class: 'note' }, 'Envia l\'enllaç a cada taula. Quan arribi el primer resultat, aquí es veurà qui va davant.'),
+    ),
+    t.schedule.map((game, gi) => {
+      const got = game.filter((_, ti) => t.results[resultKey(gi, ti)]).length;
+      return section(`Partida ${gi + 1}`, `${got} de ${game.length} rebudes`,
+        h('ol', { class: 'tables' }, game.map((_, ti) => tableRow(t, gi, ti))),
+      );
+    }),
+    section('T\'ha arribat un resultat?', null, renderPaste('Si una taula t\'envia el resultat i en tocar l\'enllaç no se t\'obre l\'app (als iPhone passa), copia el missatge del WhatsApp i enganxa\'l aquí.')),
+    h('div', { class: 'actions center' }, h('button', {
+      class: 'btn quiet danger', type: 'button',
+      onclick: () => {
+        if (!confirm(`Vols esborrar el torneig "${tournamentTitle(t)}"? S'esborren el sorteig i tots els resultats, i no es poden recuperar.`)) return;
+        setState(st => { st.tournaments = st.tournaments.filter(x => x.id !== t.id); st.tid = null; });
+        go('setup');
+      },
+    }, 'Esborra el torneig')),
+  );
+}
+
+/** Afegeix al torneig el resultat d'una taula. Qui crida ja ha preguntat si substitueix un altre. */
+function addResult(tid, g, fromCurrent) {
+  setState(st => {
+    const t = st.tournaments.find(x => x.id === tid);
+    t.results[resultKey(g.tour.game, g.tour.table)] = tableResult(g);
+    if (fromCurrent) archiveCurrentGame(st);
+    st.tid = tid;
+    st.screen = 'tournament';
+  });
+  window.scrollTo(0, 0);
+  toast(`${tableLabel(g.tour.game, g.tour.table)}: resultat afegit`);
+}
+
+const REPLACE_TEXT = 'Aquesta taula ja tenia un resultat. Vols posar aquest en lloc seu?';
+
+/** En acabar una partida de torneig: afegir-la (si el torneig és en aquest mòbil) o enviar-la a l'organitzador. */
+function tourGameActions(g) {
+  const t = findTournament(g.tour.id);
+  const check = t && acceptResult(t, g);
+  if (!check?.ok) return shareButton(g);
+  const fromCurrent = g === state.game;
+  return h('button', {
+    class: 'btn', type: 'button',
+    onclick: () => {
+      if (check.replaces && !confirm(REPLACE_TEXT)) return;
+      addResult(t.id, g, fromCurrent);
+    },
+  }, check.replaces ? 'Torna a afegir-la al torneig' : 'Afegeix-la al torneig');
+}
+
+/** El resultat d'una taula, rebut per un enllaç. */
+function renderSharedResult(g, back) {
+  const t = findTournament(g.tour.id);
+  const check = t ? acceptResult(t, g) : null;
+  let action;
+  if (!t) {
+    action = h('p', { class: 'note' }, 'Aquest resultat és d\'un torneig que no és en aquest mòbil. Si l\'organitzes tu i l\'enllaç s\'ha obert al navegador i no a l\'app, copia el missatge i enganxa\'l a l\'app, a la pantalla del torneig.');
+  } else if (!check.ok) {
+    action = h('p', { class: 'error' }, RESULT_ERROR_TEXT[check.error]);
+  } else {
+    action = h('button', {
+      class: 'btn', type: 'button',
+      onclick: () => {
+        if (check.replaces && !confirm(REPLACE_TEXT)) return;
+        clearHash();
+        incoming = null;
+        addResult(t.id, g, false);
+      },
+    }, check.replaces ? 'Substitueix el resultat que hi havia' : 'Afegeix-lo al torneig');
+  }
+  return h('div', null,
+    masthead(back),
+    tourBanner(g.tour),
+    gameReport(g, `Resultat de la taula, ${fmtRounds(g.rounds.length)}`),
+    h('div', { class: 'actions center' },
+      t && g.rounds.length < t.rounds ? h('p', { class: 'note' }, `Només hi ha ${fmtRounds(g.rounds.length)} de ${t.rounds}.`) : null,
+      action,
+    ),
+  );
+}
+
+function renderTResult() {
+  const t = currentTournament();
+  const v = state.tview;
+  const res = t && v && t.results[resultKey(v.game, v.table)];
+  if (!res) return t ? renderTournament() : renderSetup();
+  return h('div', null,
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('tournament') }, 'Torna al torneig')),
+    tourBanner({ name: t.name, game: v.game, table: v.table }),
+    gameReport({ players: res.players, rounds: res.rounds }, `Rebut el ${fmtDate(res.receivedAt)}, ${fmtRounds(res.rounds.length)}`),
+    h('div', { class: 'actions center' }, h('button', {
+      class: 'btn quiet danger', type: 'button',
+      onclick: () => {
+        if (!confirm('Vols treure aquest resultat del torneig? La taula el pot tornar a enviar.')) return;
+        setState(st => { delete findTournament(t.id).results[resultKey(v.game, v.table)]; st.tview = null; });
+        go('tournament');
+      },
+    }, 'Treu aquest resultat')),
+  );
+}
+
+function standingsTable(t, rows) {
+  return h('div', { class: 'scroll-x' }, h('table', { class: 'rounds tstand' },
+    h('thead', null, h('tr', null,
+      h('th', null, ''),
+      h('th', { class: 'name' }, 'Jugador'),
+      Array.from({ length: t.games }, (_, g) => h('th', { title: `Partida ${g + 1}` }, `P${g + 1}`)),
+      h('th', null, 'Total'),
+    )),
+    h('tbody', null, rows.map(r => h('tr', { class: r.rank === 1 ? 'first' : null },
+      h('td', null, r.rank ? `${r.rank}.` : ''),
+      h('td', { class: 'name' }, r.name),
+      r.games.map(x => h('td', null, x ? fmtPoints(x.points) : '–')),
+      h('td', { class: 'total' }, r.played ? fmtPoints(r.total) : '–'),
+    ))),
+  ));
+}
+
+function renderTStandings() {
+  const t = currentTournament();
+  if (!t) return renderSetup();
+  const rows = tournamentStandings(t);
+  const p = progress(t);
+  const done = p.received === p.total;
+  const list = awards(rows);
+  const champion = list.find(a => a.key === 'champion');
+  const diplomas = list.length ? section('Diplomes', done ? null : 'de moment',
+    h('ul', { class: 'diplomas' }, list.map(a => h('li', null,
+      h('div', { class: 'dtitle' }, h('b', null, a.title), h('small', null, a.detail)),
+      h('div', { class: 'dwho' }, h('span', null, joinNames(a.names)), h('small', null, fmtAward(a))),
+    ))),
+    h('p', { class: 'note' }, 'Si hi ha empat, el diploma és per a tots els empatats.'),
+  ) : null;
+  const table = section('Classificació', 'menys punts guanya',
+    p.received ? standingsTable(t, rows) : h('p', { class: 'note' }, 'Encara no ha arribat cap resultat.'),
+    p.received ? h('p', { class: 'note' }, `P1, P2…: els punts de cada partida.${needsScaling(t) ? ' Hi ha taules de mides diferents, així que els punts de cada taula es passen al que serien en una taula de 5 perquè sigui just. Per això hi pot haver decimals.' : ''}`) : null,
+  );
+
+
+  return h('div', null,
+    masthead(h('button', { class: 'crumb', type: 'button', onclick: () => go('tournament') }, 'Torna al torneig')),
+    champion ? h('section', { class: 'winner' },
+      h('p', { class: 'lead' }, done ? `${tournamentTitle(t)}: guanya` : (champion.names.length > 1 ? 'Ara mateix van davant' : 'Ara mateix va davant')),
+      h('p', { class: 'name' }, joinNames(champion.names)),
+      h('p', { class: 'sub' }, `${fmtPoints(champion.value)} punts. ${done ? 'Han arribat tots els resultats.' : `Falten ${plural(p.total - p.received, 'taula', 'taules')} per enviar el resultat.`}`),
+    ) : null,
+    // Mentre es juga interessa més la classificació; al final, els diplomes.
+    ...(done ? [diplomas, table] : [table, diplomas]),
+    p.received ? h('div', { class: 'actions center' },
+      h('button', { class: 'btn', type: 'button', onclick: () => shareText(standingsMessage(t, rows)) }, 'Comparteix la classificació'),
+    ) : null,
+  );
+}
+
+// ---- La invitació d'una taula (mòbil de la taula) ----
+function startTourGame(inv) {
+  const g = state.game;
+  clearHash();
+  invite = null;
+  inviteError = null;
+  if (g && sameTable(g.tour, inv)) { go('game'); return; }
+  if (g && g.rounds.length && !confirm('En aquest mòbil hi ha una partida a mitges. Es desarà a l\'historial tal com està i començarà la del torneig.')) {
+    go(state.game ? 'game' : 'setup');
+    return;
+  }
+  setState(st => {
+    if (st.game) archiveCurrentGame(st);
+    st.game = { ...createGame(inv.players, inv.rounds), tour: { id: inv.id, name: inv.name, game: inv.game, table: inv.table } };
+    st.draft = emptyDraft(inv.players.length);
+    st.screen = 'game';
+  });
+  window.scrollTo(0, 0);
+}
+
+function leaveInvite() {
+  clearHash();
+  invite = null;
+  inviteError = null;
+  go(state.game ? 'game' : 'setup');
+}
+
+function renderInvite() {
+  const back = h('button', { class: 'crumb', type: 'button', onclick: leaveInvite }, state.game ? 'Torna a la partida' : 'Inici');
+  if (inviteError) {
+    return h('div', null,
+      masthead(back),
+      section('No s\'ha pogut obrir l\'enllaç de la taula', null,
+        h('p', { class: 'lede' }, SHARE_ERROR_TEXT[inviteError] ?? SHARE_ERROR_TEXT['bad-link']),
+        h('button', { class: 'btn block', type: 'button', onclick: leaveInvite }, state.game ? 'Torna a la partida' : 'Ves a l\'inici'),
+      ),
+    );
+  }
+  const inv = invite;
+  if (!inv) return renderSetup();
+  const playing = state.game && sameTable(state.game.tour, inv);
+
+  return h('div', null,
+    masthead(back),
+    h('section', { class: 'winner' },
+      h('p', { class: 'lead' }, `${inv.name || 'Torneig de Papayoo'}, partida ${inv.game + 1}`),
+      h('p', { class: 'name' }, `Taula ${inv.table + 1}`),
+      h('p', { class: 'sub' }, `${fmtRounds(inv.rounds)}. Guanya qui fa menys punts.`),
+    ),
+    section('Qui hi juga', null,
+      h('ul', { class: 'seats' }, inv.players.map((name, i) => h('li', null, dot(i, 20), name))),
+    ),
+    h('section', { class: 'section' },
+      playing ? h('p', { class: 'note', style: { margin: '0 0 12px' } }, 'Aquesta partida ja l\'esteu jugant en aquest mòbil.') : null,
+      h('button', { class: 'btn block', type: 'button', onclick: () => startTourGame(inv) }, playing ? 'Continua la partida' : 'Comença la partida'),
+      h('p', { class: 'note' }, 'Apunteu els punts com sempre. En acabar, envieu el resultat a l\'organitzador amb el botó que sortirà.'),
+    ),
+  );
+}
+
 // ---------- Arrencada ----------
-if (readHash()) state.screen = 'shared';
+{
+  const screen = readHash();
+  if (screen) state.screen = screen;
+}
 render();
 
 // Si toquen un altre enllaç amb l'app oberta, l'adreça canvia sense recarregar.
 window.addEventListener('hashchange', () => {
-  if (!readHash()) return;
-  go('shared');
+  const screen = readHash();
+  if (screen) go(screen);
 });
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
