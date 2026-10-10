@@ -63,7 +63,11 @@ Fitxers:
 
 ## Publicar
 
-Publicada a **https://appayo.vercel.app** (projecte `appayo` a Vercel; `vercel --prod` des d'aquesta carpeta torna a desplegar).
+Publicada a **https://appayo.vercel.app** (projecte `appayo` a Vercel, connectat a aquest repo).
+Cada push a `main` es publica sol a producció en un minut; les altres branques i els
+pull requests tenen la seva pròpia URL de prova. Abans de fer push: `npm test`, i si
+canvies fitxers de l'app, puja la versió de la memòria cau a `sw.js` perquè els mòbils
+que ja la tenen instal·lada agafin la nova.
 
 És una carpeta estàtica: es pot pujar a Vercel, Netlify, GitHub Pages o qualsevol
 servidor. Per instal·lar-la al mòbil cal servir-la per HTTPS: a iPhone, Safari →
