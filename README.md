@@ -1,74 +1,49 @@
-# Appayo
+# APPayo
 
-Comptador de punts per al **Papayoo** (Gigamic). Web app per al mòbil, sense servidor,
-instal·lable a la pantalla d'inici i que funciona sense connexió.
+Comptador de punts per al **Papayoo** (Gigamic), en català. Les partides individuals continuen funcionant al navegador i sense connexió. Els tornejos fan servir un servidor per compartir el sorteig, l'estat de les taules i els resultats.
 
-## Com funciona
+## Partides individuals
 
-1. Escriu els noms dels jugadors (de 3 a 8) i tria quantes rondes jugareu.
-2. A cada ronda, primer digues **qui s'ha endut el Papayoo** (obligatori, val 40 punts).
-3. Posa els punts de cada jugador amb els botons (−10, −5, −, +, +5, +10) o escrivint al camp.
-4. L'últim jugador que quedi sense punts rep **la resta fins a 250** automàticament. Qui fa 0 no cal
-   tocar-lo: un cop repartits els 250 punts, els que s'han deixat en blanc compten 0.
-5. Desa la ronda. Guanya qui té menys punts.
-6. Durant la partida hi ha la classificació, una gràfica de l'evolució dels punts i la taula ronda a ronda.
-   Si hi ha un error en una ronda ja desada, es toca a la taula "Ronda a ronda" i s'arregla
-   (també a les partides de l'historial). La partida es desa a cada tecla: si es tanca l'app o
-   s'apaga el mòbil, en tornar-la a obrir continua on era.
-7. Les partides acabades queden a "Partides anteriors" (al mateix mòbil), amb classificació, gràfica i taula.
-   Cadascú pot esborrar-ne una (obrint-la) o tot l'historial; només s'esborra del seu mòbil.
-8. Amb "Comparteix la partida" s'envia per WhatsApp (o el que sigui) un resum amb qui guanya i un
-   enllaç que obre la partida sencera. Qui el rep la pot desar a les seves partides. Si l'enllaç no
-   li obre l'app (als iPhone passa), pot enganxar-lo a "Partides anteriors".
+A la pestanya **Nova partida**, escriu els noms de 3 a 8 jugadors i tria les rondes. Les altres pestanyes obren **Torneig** i **Historial**. A cada ronda, marca qui s'ha endut el Papayoo i reparteix exactament 250 punts. L'app calcula la resta si falta un jugador, mostra la classificació i desa la partida al mòbil. Es poden corregir rondes. Per compartir una partida cal connexió: es desa una còpia al servidor i es genera un enllaç curt `/shared/UUID`. Si es torna a compartir des del mateix navegador, s'actualitza la còpia i es conserva l'enllaç. Qualsevol persona amb l'enllaç pot consultar-ne els resultats.
 
-### Torneig
+## Tornejos
 
-Per jugar a moltes taules alhora, com el full d'Excel del torneig ("Organitza un torneig", a baix de tot de l'inici):
+1. A **Organitza un torneig**, escriu el nom, els jugadors, les partides, les rondes i una contrasenya de l'organitzador. El servidor crea el sorteig i un identificador únic.
+2. Envia a cada taula el seu enllaç. L'enllaç conté un token propi de la taula: permet consultar-la i enviar-ne les rondes, però no gestionar el torneig. Els codis QR es podran afegir més endavant a partir d'aquests enllaços.
+3. La taula apunta una ronda i la desa. La ronda es guarda primer al mòbil i s'envia al servidor; si no hi ha connexió, es torna a enviar quan n'hi ha. Es poden corregir rondes ja desades.
+4. L'organitzador i la pantalla pública mostren quantes rondes porta cada taula i quantes taules han acabat. La pantalla d'organitzador consulta l'estat cada 5 segons; la pública, cada 15 segons.
+5. Quan han acabat totes les taules, l'organitzador pot revelar el podi en tres passos (tercer, segon i primer lloc) i després la classificació i els diplomes. Els punts i la classificació els calcula el servidor.
 
-1. L'organitzador enganxa els noms (un per línia) i tria quantes partides i quantes rondes (per defecte 3 de 5).
-2. "Fes el sorteig": l'app fa les taules de totes les partides (de 4 a 6 jugadors) mirant que ningú repeteixi
-   company de taula. Si amb pocs jugadors no es pot evitar, ho diu.
-3. "Envia a la taula" envia per WhatsApp un enllaç a cada taula. En obrir-lo, la partida surt amb els noms i les
-   rondes. La taula juga com sempre i, en acabar, "Envia el resultat a l'organitzador".
-4. L'organitzador obre aquest enllaç (o l'enganxa a la pantalla del torneig) i "Afegeix-lo al torneig". També pot
-   apuntar una taula al seu mòbil ("Apunta-la aquí").
-5. La classificació (menys punts guanya) i els diplomes de l'Excel: campió/ona, cullera de fusta, més rondes a 0,
-   més Papayoos i rècord en una ronda. En cas d'empat, el diploma és per a tots. Si hi ha taules de mides
-   diferents, els punts de cada taula es passen al que serien en una taula de 5, perquè sigui just.
+Les adreces principals són `/` per preparar una partida, `/game/ID` per veure'n l'estat o els resultats, `/game/ID/points` per entrar punts i `/game/ID/rounds` per consultar les rondes jugades i la gràfica. Els tornejos són a `/tournaments`, `/tournaments/new`, `/tournaments/ID`, `/tournaments/spectate/ID` i `/tournaments/table/TOKEN`. L'historial de partides individuals és a `/history`, però cada partida desada conserva la seva adreça `/game/ID`. Els enllaços compartits són `/shared/UUID` i `/shared/UUID/rounds`; també es poden recarregar i obrir en un altre dispositiu. Les partides de l'historial només són visibles al navegador on s'han desat. Les antigues adreces `/game` i `/history/ID` es redirigeixen a la nova ruta. Els enllaços anteriors amb `#p=…` continuen funcionant. Els enllaços anteriors `tournament.html#admin=…`, `#view=…` i `#table=…` es redirigeixen al camí corresponent.
 
-El torneig només és al mòbil de l'organitzador; no passa per cap servidor.
+Els tornejos antics que només hi hagués al `localStorage` no s'importen. Els seus antics enllaços `#t=` deixen de ser vàlids.
 
-Regles que aplica l'app: total de 250 punts per ronda, cap valor negatiu, qui té el
-Papayoo té com a mínim 40 punts, i la resta com a màxim 210.
+## Desenvolupament local
 
-## Desenvolupament
-
-No cal instal·lar res. Per provar-ho en local:
+Cal Node.js 24 i npm. No cal Docker ni un compte de Neon per treballar en local.
 
 ```sh
-npm start        # serveix la carpeta a http://localhost:4173
-npm test         # proves de la lògica (node --test)
+npm install
+npm start
+npm test
 ```
 
-Fitxers:
+`npm start` serveix l'app i l'API a `http://localhost:4173`. La base de dades local és SQLite a `.data/appayo.sqlite`; `SQLITE_PATH` permet canviar-ne la ruta. L'esquema inicial es crea automàticament. `npm test` executa les proves de la lògica i de l'API.
 
-- `logic.js` — lògica pura de puntuació (provada a `test/`).
-- `app.js` — interfície i desat a `localStorage` (partida en curs i historial de partides).
-- `chart.js` — gràfica SVG de punts acumulats (sense dependències).
-- `tournament.js` — torneig: sorteig de taules sense repetir companys, enllaços per a cada taula i classificació
-  amb diplomes (provat a `test/`).
-- `share.js` — compartir una partida: la porta el mateix enllaç, darrere del `#`, i per això no
-  arriba mai a cap servidor (provat a `test/`).
-- `index.html`, `styles.css`, `fonts/` (Bricolage Grotesque, llicència OFL), `manifest.webmanifest`, `sw.js`, `icons/` — la PWA.
+## Estructura
 
-## Publicar
+- `frontend/`: HTML, CSS, JavaScript, icones i service worker de la PWA. Les crides a `/api/` sempre van a la xarxa; no es guarden a la memòria cau. Els camins del torneig es defineixen a `routes.js`.
+- `backend/`: API, sorteig, classificació i persistència. `backend/local.js` serveix l'app i l'API en local.
+- `api/index.js`: punt d'entrada de Vercel per al backend.
+- `test/`: proves de puntuació, enllaços i API.
+- `vercel.json`: publica `frontend/` i envia `/api/v1/*` a la funció de Vercel.
 
-Publicada a **https://appayo.vercel.app** (projecte `appayo` a Vercel, connectat a aquest repo).
-Cada push a `main` es publica sol a producció en un minut; les altres branques i els
-pull requests tenen la seva pròpia URL de prova. Abans de fer push: `npm test`, i si
-canvies fitxers de l'app, puja la versió de la memòria cau a `sw.js` perquè els mòbils
-que ja la tenen instal·lada agafin la nova.
+## Desplegament a Vercel i Neon
 
-És una carpeta estàtica: es pot pujar a Vercel, Netlify, GitHub Pages o qualsevol
-servidor. Per instal·lar-la al mòbil cal servir-la per HTTPS: a iPhone, Safari →
-Compartir → "Afegeix a la pantalla d'inici"; a Android, Chrome → "Instal·la l'app".
+Les tasques concretes per configurar el projecte existent a Vercel són a [TODO-BIEL.md](TODO-BIEL.md).
+
+Aquest repositori conté el codi de la funció i la configuració de desplegament. **Abans que els tornejos funcionin en un desplegament**, cal crear dues bases de dades PostgreSQL a Neon: una per a producció i una altra per a les previsualitzacions. Connecta-les al projecte de Vercel, cadascuna al seu entorn, perquè les funcions rebin `DATABASE_URL`. La cadena de connexió és secreta i no s'ha d'afegir al repositori. El backend crea l'esquema inicial amb `CREATE TABLE IF NOT EXISTS` a la primera petició.
+
+El `package.json` fixa Node.js 24. A Vercel, la funció exigeix `DATABASE_URL`: si falta, respon amb un error i no intenta desar dades en un fitxer temporal. Després de connectar o canviar variables d'entorn, cal fer un desplegament nou. El servei PostgreSQL i Vercel tenen límits gratuïts independents.
+
+La branca `main` es publica a `https://appayo.vercel.app` quan s'hi fa push. Aquesta branca de treball no canvia producció fins que s'integri a `main`.

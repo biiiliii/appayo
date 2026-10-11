@@ -4,8 +4,8 @@ import {
   tableSizes, makeSchedule, countRepeats, seededRandom, parseNames, validateTournament,
   createTournament, encodeInvite, decodeInvite, inviteLink, inviteMessage, resultMessage,
   tableResult, acceptResult, tournamentStandings, needsScaling, awards, standingsMessage, fmtPoints, progress,
-} from '../tournament.js';
-import { encodeGame, decodeShared } from '../share.js';
+} from '../backend/tournament.js';
+import { encodeGame, decodeShared } from '../frontend/share.js';
 
 const names = (n) => Array.from({ length: n }, (_, i) => `Jugador ${i + 1}`);
 const sum = (a) => a.reduce((x, y) => x + y, 0);

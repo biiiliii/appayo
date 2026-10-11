@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "outputDirectory": "frontend",
+  "rewrites": [
+    { "source": "/api/v1/:path*", "destination": "/api/index?path=:path*" },
+    { "source": "/game", "destination": "/index.html" },
+    { "source": "/game/edit", "destination": "/index.html" },
+    { "source": "/game/:id", "destination": "/index.html" },
+    { "source": "/game/:id/:view", "destination": "/index.html" },
+    { "source": "/history", "destination": "/index.html" },
+    { "source": "/history/:id", "destination": "/index.html" },
+    { "source": "/history/:id/edit", "destination": "/index.html" },
+    { "source": "/shared/:id", "destination": "/index.html" },
+    { "source": "/shared/:id/rounds", "destination": "/index.html" },
+    { "source": "/tournaments", "destination": "/tournament.html" },
+    { "source": "/tournaments/:path*", "destination": "/tournament.html" }
+  ]
+}

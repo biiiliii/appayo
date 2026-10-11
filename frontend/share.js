@@ -1,6 +1,6 @@
-// Compartir una partida: la partida viatja dins del mateix enllaç, darrere del #, i per això
-// no arriba mai a cap servidor. Sense DOM: es prova amb `node --test`.
-import { TOTAL, MIN_PLAYERS, MAX_PLAYERS, standings } from './logic.js';
+// Compartir una partida: les dades viuen al servidor i l'enllaç només porta un UUID.
+// Els enllaços antics amb #p= continuen sent llegibles.
+import { TOTAL, PAPAYOO_POINTS, MIN_PLAYERS, MAX_PLAYERS, standings } from './logic.js';
 
 const VERSION = 1;
 
@@ -30,10 +30,39 @@ export function encodeGame(game) {
 export function readTour(t) {
   if (!Array.isArray(t) || t.length !== 4) return null;
   const [id, game, table, name] = t;
-  if (typeof id !== 'string' || !/^[a-z0-9]{1,16}$/.test(id)) return null;
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,16}$/.test(id)) return null;
   if (!isInt(game) || game < 0 || game > 19 || !isInt(table) || table < 0 || table > 49) return null;
   if (typeof name !== 'string' || name.length > 60) return null;
   return { id, name, game, table };
+}
+
+/** Valida i copia la partida que es desa al servidor, sense camps locals ni secrets. */
+export function normalizeSharedGame(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { players, rounds, createdAt, endedAt, roundsPlanned, tour } = value;
+  if (!Array.isArray(players) || players.length < MIN_PLAYERS || players.length > MAX_PLAYERS
+      || !players.every(n => typeof n === 'string' && n.trim() && n.length <= 40)) return null;
+  if (!Number.isSafeInteger(createdAt) || !Number.isSafeInteger(endedAt)) return null;
+  if (!Array.isArray(rounds) || !rounds.length || !rounds.every(r =>
+    r && Number.isInteger(r.papayoo) && r.papayoo >= 0 && r.papayoo < players.length
+    && Array.isArray(r.points) && r.points.length === players.length
+    && r.points.every(p => Number.isInteger(p) && p >= 0 && p <= TOTAL)
+    && r.points[r.papayoo] >= PAPAYOO_POINTS
+    && r.points.reduce((sum, p) => sum + p, 0) === TOTAL)) return null;
+  if (roundsPlanned !== undefined && roundsPlanned !== null
+      && (!Number.isInteger(roundsPlanned) || roundsPlanned < 1)) return null;
+  const clean = {
+    players: players.slice(),
+    rounds: rounds.map(r => ({ papayoo: r.papayoo, points: r.points.slice() })),
+    createdAt, endedAt,
+  };
+  if (roundsPlanned !== undefined) clean.roundsPlanned = roundsPlanned;
+  if (tour !== undefined) {
+    const checked = readTour([tour?.id, tour?.game, tour?.table, tour?.name ?? '']);
+    if (!checked) return null;
+    clean.tour = checked;
+  }
+  return clean;
 }
 
 const fail = (error) => ({ ok: false, error });
@@ -70,6 +99,7 @@ export function decodeShared(text) {
     if (papayoo < 0 || papayoo >= n) return fail('bad-data');
     if (points.some(p => p < 0 || p > TOTAL)) return fail('bad-data');
     if (points.reduce((a, p) => a + p, 0) !== TOTAL) return fail('bad-data');
+    if (points[papayoo] < PAPAYOO_POINTS) return fail('bad-data');
     rounds.push({ papayoo, points });
   }
 
@@ -82,8 +112,13 @@ export function decodeShared(text) {
   return { ok: true, game };
 }
 
-/** L'enllaç per enviar: la mateixa adreça de l'app amb la partida darrere del #. */
-export function shareLink(game, base) {
+/** Enllaç curt d'una partida desada al servidor. */
+export function shareLink(id, base) {
+  return `${new URL(base).origin}/shared/${encodeURIComponent(id)}`;
+}
+
+/** Enllaç antic amb les dades dins del fragment, per conservar-ne la compatibilitat. */
+export function legacyShareLink(game, base) {
   const url = new URL(base);
   url.hash = '';
   url.search = '';

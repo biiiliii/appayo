@@ -1,0 +1,28 @@
+.tour-form { display: grid; gap: 12px; }
+.tour-form label { display: grid; gap: 5px; font-weight: 700; }
+.tour-form input, .tour-form textarea, .tour-form select { width: 100%; box-sizing: border-box; font: inherit; padding: 10px; border: 1px solid #a9a49a; border-radius: 8px; background: white; color: #25231f; }
+.tour-form textarea { min-height: 180px; }
+.tour-form .short { max-width: 180px; }
+.tour-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.tour-row > * { flex: 1; }
+.tour-row .btn { flex: 0 1 auto; }
+.tour-error { color: #9d3027; font-weight: 700; }
+.tour-ok { color: #247451; font-weight: 700; }
+.tour-score { margin: 12px 0; padding: 0; list-style: none; }
+.tour-score li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #ddd5c7; padding: 8px 0; }
+.tour-score strong { white-space: nowrap; }
+.tour-card { padding: 14px 0; border-bottom: 1px solid #ddd5c7; }
+.tour-card p { margin: 6px 0; }
+.tour-form .points-grid { display: grid; grid-template-columns: 1fr 100px; gap: 8px; align-items: center; }
+.tour-form .points-grid input { text-align: right; }
+.tour-results { overflow-x: auto; }
+.tour-results table { border-collapse: collapse; width: 100%; }
+.tour-results th, .tour-results td { padding: 7px 10px; border-bottom: 1px solid #ddd5c7; text-align: left; white-space: nowrap; }
+.tour-podium { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin: 18px 0; }
+.tour-place { display: grid; gap: 5px; min-width: 130px; flex: 1; padding: 18px; border-radius: 16px; background: #e8e0cd; animation: place-in .5s ease both; }
+.tour-place span { font-size: 32px; font-weight: 900; }
+.tour-place strong { font-size: 22px; }
+.tour-place.place-1 { background: #f5d577; order: 2; padding-top: 30px; }
+.tour-place.place-2 { background: #dfe4e8; order: 1; }
+.tour-place.place-3 { background: #e6b694; order: 3; }
+@keyframes place-in { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }

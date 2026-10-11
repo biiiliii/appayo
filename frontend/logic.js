@@ -13,11 +13,11 @@ export function clampPoints(value) {
 }
 
 /**
- * Resol una ronda a mig introduir. El Papayoo només indica qui se l'ha endut (els seus 40 punts
- * ja van dins del total que introdueix cada jugador), però és obligatori dir-ho.
+ * Resol una ronda a mig introduir. Els 40 punts del Papayoo ja van dins del total
+ * del jugador que se l'ha endut. Si només un jugador pot tenir-lo, es marca automàticament.
  * Qui es deixa en blanc fa 0 un cop ja s'han repartit els 250 punts; si només en queda un, rep la resta.
  * @param {{papayoo: number|null, points: (number|null)[]}} input  null = punts no introduïts
- * @returns {{valid: boolean, points: (number|null)[], auto: number|null, remaining: number, errors: string[]}}
+ * @returns {{valid: boolean, papayoo: number|null, points: (number|null)[], auto: number|null, remaining: number, errors: string[]}}
  */
 export function resolveRound({ papayoo, points }) {
   const errors = [];
@@ -48,11 +48,20 @@ export function resolveRound({ papayoo, points }) {
     errors.push('over-total');
   }
 
-  if (papayoo === null || papayoo === undefined) errors.push('papayoo-missing');
+  const complete = resolved.every(p => p !== null && p !== undefined) && remaining === 0 && errors.length === 0;
+  const candidates = complete ? resolved.flatMap((p, i) => p >= PAPAYOO_POINTS ? [i] : []) : [];
+  const selected = papayoo === null || papayoo === undefined
+    ? (candidates.length === 1 ? candidates[0] : null)
+    : papayoo;
+  if (!Number.isInteger(selected) || selected < 0 || selected >= points.length) errors.push('papayoo-missing');
+  else if (resolved[selected] !== null && resolved[selected] !== undefined && resolved[selected] < PAPAYOO_POINTS) {
+    errors.push('papayoo-points');
+  }
 
   const unique = [...new Set(errors)];
   return {
     valid: unique.length === 0 && (missing.length <= 1 || remaining === 0),
+    papayoo: selected,
     points: resolved,
     auto,
     remaining,
@@ -97,6 +106,7 @@ export function validateSetup(names) {
 export function createGame(players, roundsPlanned) {
   const names = normalizeNames(players);
   return {
+    id: `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     players: names,
     roundsPlanned: roundsPlanned === 'players' ? names.length : (roundsPlanned || null),
     rounds: [],

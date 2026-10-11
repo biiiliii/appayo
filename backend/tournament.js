@@ -1,6 +1,16 @@
 // Torneig: sorteig de taules, enllaços per a cada taula i classificació. Sense DOM: es prova amb `node --test`.
-import { MIN_PLAYERS, MAX_PLAYERS, standings } from './logic.js';
-import { toBase64Url, fromBase64Url } from './share.js';
+const MIN_PLAYERS = 3;
+const MAX_PLAYERS = 8;
+const toBase64Url = bytes => Buffer.from(bytes).toString('base64url');
+const fromBase64Url = value => new Uint8Array(Buffer.from(value, 'base64url'));
+
+function standings(players, rounds) {
+  const totals = players.map((_, i) => rounds.reduce((sum, r) => sum + r.points[i], 0));
+  const rows = players.map((name, index) => ({ name, index, total: totals[index] }));
+  rows.sort((a, b) => a.total - b.total || a.index - b.index);
+  rows.forEach((row, i) => { row.rank = i && row.total === rows[i - 1].total ? rows[i - 1].rank : i + 1; });
+  return rows;
+}
 
 export const MAX_TOURNAMENT_PLAYERS = 120;
 export const MAX_GAMES = 10;

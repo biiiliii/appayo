@@ -50,29 +50,60 @@ button { cursor: pointer; }
 
 .app { max-width: 560px; margin: 0 auto; padding: 0 18px 56px; padding-top: max(14px, env(safe-area-inset-top)); }
 
-/* ---- Capçalera: marca a l'esquerra, context a la dreta ---- */
+/* ---- Marca centrada i navegació principal ---- */
 .masthead {
-  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px;
-  padding: 10px 0 14px; border-bottom: 3px solid var(--rule-strong);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 10px 0 14px; text-align: center;
+}
+.masthead.with-action { flex-direction: row; justify-content: space-between; flex-wrap: wrap; text-align: left; }
+.masthead.with-action .crumb { margin-left: auto; white-space: nowrap; }
+@media (max-width: 400px) {
+  .masthead.with-action .wordmark { font-size: clamp(26px, 8vw, 32px); }
+  .masthead.with-action .brand { gap: 6px; }
+  .masthead.with-action .brand-icon { width: 30px; height: 40px; }
+  .masthead.with-action .crumb { font-size: 13px; }
 }
 .wordmark {
-  margin: 0; font-size: 30px; line-height: 1; letter-spacing: -.03em;
+  margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.03em;
   font-weight: 800; font-stretch: 85%; font-variation-settings: "opsz" 96;
 }
-.wordmark button { all: unset; cursor: pointer; }
-.wordmark button:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; border-radius: 4px; }
-.context { font-size: 16px; color: var(--ink-2); font-weight: 600; text-align: right; }
+.wordmark button, .wordmark a { all: unset; cursor: pointer; display: inline-flex; }
+.wordmark button:focus-visible, .wordmark a:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; border-radius: 4px; }
+.brand { display: inline-flex; align-items: center; gap: 11px; white-space: nowrap; }
+.brand-icon { display: block; width: 36px; height: 48px; flex: none; }
+.brand-word { display: inline-flex; align-items: baseline; }
+.brand-app { letter-spacing: -.065em; }
+.brand-a { color: var(--papaya); transform: rotate(-8deg) translateY(1px); }
+.brand-y { color: var(--green); transform: rotate(7deg) translateY(-1px); }
+.brand-infinity { color: var(--papaya); font-family: Arial, sans-serif; font-size: 1.3em; font-weight: 900; line-height: .75; letter-spacing: -.04em; -webkit-text-stroke: .7px currentColor; transform: translateY(3px) scaleX(1.1); }
+.context { font-size: 16px; color: var(--ink-2); font-weight: 600; }
 .context b { color: var(--ink); font-weight: 800; }
+.main-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 2px solid var(--rule-strong); }
+.main-tabs.game-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.main-tabs.game-tabs.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.main-tabs a {
+  display: grid; place-items: center; min-height: 49px; padding: 4px 2px;
+  color: var(--ink-2); font-size: 15px; font-weight: 700; text-align: center;
+  text-decoration: none; border-bottom: 4px solid transparent;
+}
+.main-tabs a:hover { color: var(--green-deep); background: var(--green-tint); }
+.main-tabs a[aria-current="page"] { color: var(--green-deep); border-bottom-color: var(--green-deep); }
+.main-tabs a:focus-visible { outline-offset: -4px; }
+@media (max-width: 360px) { .main-tabs a { font-size: 14px; } }
 
 /* ---- Seccions: un títol en el tipus de display i una regla ---- */
 .section { padding: 22px 0 6px; }
 .section + .section { border-top: 1px solid var(--rule); }
+.setup-page > .section + .section { border-top: 0; }
 .section-title {
   margin: 0 0 12px; font-size: 22px; line-height: 1.1; letter-spacing: -.02em;
   font-weight: 700; font-stretch: 90%; font-variation-settings: "opsz" 40;
   display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px;
 }
 .section-title small { font-size: 15px; font-weight: 500; font-stretch: 100%; color: var(--muted); letter-spacing: 0; }
+.standings-title { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.round-counter { color: var(--ink-2); font-size: 15px; font-weight: 500; font-stretch: 100%; letter-spacing: 0; white-space: nowrap; }
+.round-counter b { color: var(--ink); font-weight: 800; }
 .lede { margin: 0 0 14px; color: var(--ink-2); max-width: 46ch; }
 .note { color: var(--muted); font-size: 14.5px; margin: 8px 0 0; max-width: 60ch; }
 .error { color: var(--danger); font-weight: 600; font-size: 15px; margin: 10px 0 0; }
@@ -89,14 +120,36 @@ button { cursor: pointer; }
 .btn.block { width: 100%; }
 .btn.outline { background: transparent; color: var(--green-deep); }
 .btn.outline:disabled { color: var(--muted); background: transparent; }
+.share-spinner { width: 18px; height: 18px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: share-spin .7s linear infinite; }
+@keyframes share-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .share-spinner { animation-duration: 1.5s; } }
 .btn.quiet { background: transparent; border-color: transparent; color: var(--ink-2); font-weight: 600; min-height: 44px; padding: 0 12px; }
 .btn.quiet.danger { color: var(--danger); }
 .btn.small { min-height: 40px; padding: 0 14px; font-size: 15px; border-radius: var(--r-s); }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 18px; }
 .actions.center { justify-content: center; }
 .actions.end { justify-content: flex-end; }
+.game-progress-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-items: center; gap: 8px; }
+.game-progress-actions .btn { width: auto; max-width: 100%; min-width: 0; padding-inline: 12px; }
+.game-progress-actions .btn:last-child { grid-column: 1 / -1; }
+
+/* ---- Partida en curs i confirmació ---- */
+.resume-card { margin-top: 22px; padding: 18px; border: 1px solid var(--rule); border-radius: var(--r-m); background: var(--sheet); }
+.resume-card .section-title { justify-content: flex-start; gap: 8px; }
+.resume-card .lede { margin-bottom: 16px; }
+.resume-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.resume-actions .btn { min-width: 0; padding: 8px; font-size: 15px; line-height: 1.15; }
+.btn.outline.danger { border-color: var(--danger); color: var(--danger); }
+.btn.confirm-danger { border-color: var(--danger); background: var(--danger); }
+.game-dialog { width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 22px; border: 1px solid var(--rule); border-radius: 16px; background: var(--sheet); color: var(--ink); box-shadow: 0 20px 60px rgb(0 0 0 / .22); }
+.game-dialog::backdrop { background: rgb(12 30 20 / .5); }
+.game-dialog h2 { margin: 0 0 10px; font-size: 23px; line-height: 1.15; }
+.game-dialog p { margin: 0; color: var(--ink-2); }
+.game-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.game-dialog-actions .btn { flex: 1 1 145px; padding-inline: 12px; }
 
 /* ---- Llista de jugadors (inici) ---- */
+.setup-inset { padding: 5px 14px 14px; }
 .roster { list-style: none; margin: 0; padding: 0; }
 .roster li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--rule); }
 .text {
@@ -109,12 +162,15 @@ button { cursor: pointer; }
 .remove:hover, .remove:focus-visible { color: var(--danger); background: var(--danger-tint); }
 .remove:disabled { opacity: .25; cursor: default; background: transparent; }
 
-.choices { display: flex; gap: 8px; flex-wrap: wrap; }
-.choice {
-  min-height: 44px; padding: 0 16px; border-radius: 999px; font-weight: 600;
-  border: 2px solid var(--rule); background: var(--sheet); color: var(--ink);
-}
-.choice[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: #fff; }
+.round-options { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 9px; }
+.round-option { position: relative; display: flex; align-items: center; gap: 5px; height: 48px; padding: 4px 8px; border: 2px solid var(--rule); border-radius: var(--r-m); background: var(--sheet); font-size: 15px; font-weight: 700; cursor: pointer; }
+.round-option:has(input[type="radio"]:checked) { background: var(--green-tint); }
+.round-option:has(input[type="radio"]:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.round-option input[type="radio"] { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.round-option label { cursor: pointer; white-space: nowrap; }
+.round-option input[type="number"] { width: 48px; height: 32px; padding: 0 2px; border: 0; border-bottom: 1px solid var(--rule-strong); border-radius: 0; background: transparent; text-align: center; font-size: 19px; font-weight: 600; appearance: textfield; cursor: text; }
+.round-option input[type="number"]:focus { outline: none; border-bottom-color: var(--green); box-shadow: 0 1px 0 var(--green); }
+.round-option input[type="number"]::-webkit-inner-spin-button, .round-option input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
 
 /* ---- Classificació: full de punts ---- */
 .ledger { list-style: none; margin: 0; padding: 0; }
@@ -215,9 +271,10 @@ button { cursor: pointer; }
 .rounds th, .rounds td { padding: 8px 8px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
 .rounds th { font-weight: 600; color: var(--ink-2); max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
 .rounds th:first-child, .rounds td:first-child { text-align: left; color: var(--muted); padding-left: 0; }
-.rounds td.pap { color: var(--papaya); font-weight: 700; }
+.rounds td.pap { font-weight: 700; }
+.round-score { display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.round-score .pcard { width: 16px; height: 22px; font-size: 11px; border-radius: 2px; }
 .rounds tfoot td { font-weight: 800; font-size: 17px; border-bottom: 0; border-top: 2px solid var(--rule-strong); }
-.legend-note { display: inline-flex; align-items: center; gap: 8px; }
 .rounds tr.editable { cursor: pointer; }
 .rounds tr.editable:active td { background: var(--green-tint); }
 .rounds .fix { all: unset; cursor: pointer; color: var(--green-deep); font-weight: 700; display: inline-block; min-width: 44px; padding: 4px 0; }
@@ -249,26 +306,43 @@ button { cursor: pointer; }
 
 /* ---- Historial de partides ---- */
 .games { list-style: none; margin: 0; padding: 0; }
-.games li { border-bottom: 1px solid var(--rule); }
-.games button {
-  all: unset; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; width: 100%;
-  padding: 14px 0; cursor: pointer; box-sizing: border-box;
+.games li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto 1fr;
+  column-gap: 12px; position: relative; padding: 14px 10px;
+  border-bottom: 1px solid var(--rule); transition: background-color .15s ease;
 }
-.games button:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; border-radius: 4px; }
-.games .when { color: var(--muted); font-size: 14px; }
-.games .who { font-weight: 600; font-size: 17px; grid-row: 2; }
-.games .won { grid-row: 1 / span 2; align-self: center; text-align: right; font-weight: 800; font-size: 18px; color: var(--green); }
-.games .won small { display: block; font-size: 13px; font-weight: 500; color: var(--muted); }
+.games li:first-child { border-top: 1px solid var(--rule); }
+.games li:hover { background: #f4f5f3; }
+.games .history-open { all: unset; grid-column: 1; grid-row: 1 / 3; min-width: 0; cursor: pointer; }
+.games .history-open::after { content: ""; position: absolute; inset: 0; }
+.games .history-open:focus-visible { outline: none; }
+.games .history-open:focus-visible::after { outline: 3px solid var(--focus); outline-offset: -3px; border-radius: 4px; }
+.history-players { display: grid; gap: 4px; min-width: 0; }
+.history-player { display: block; font-size: 16px; overflow-wrap: anywhere; }
+.history-crown { margin-right: 5px; }
+.history-name { font-weight: 600; }
+.history-player.first .history-name { color: var(--green-deep); font-weight: 800; }
+.history-points { color: var(--ink-2); }
+.history-meta { display: flex; grid-column: 2; grid-row: 1; flex-direction: column; align-items: flex-end; gap: 2px; color: var(--muted); font-size: 14px; white-space: nowrap; }
+.history-date { color: var(--ink-2); font-weight: 700; }
+.history-actions { display: flex; grid-column: 2; grid-row: 2; align-self: end; justify-content: flex-end; gap: 2px; position: relative; z-index: 1; }
+.games .history-action { all: unset; display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--r-s); color: var(--ink-2); cursor: pointer; }
+.games .history-action:hover { background: var(--rule); color: var(--green-deep); }
+.games .history-action.danger:hover { background: var(--danger-tint); color: var(--danger); }
+.games .history-action:disabled { opacity: .55; cursor: wait; }
+.games .history-action:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
+.history-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 18px 0 4px; }
+.history-pagination .btn { min-width: 0; padding-inline: 10px; }
+.history-page-label { color: var(--ink-2); font-size: 14px; font-weight: 600; text-align: center; white-space: nowrap; }
 .empty { color: var(--ink-2); margin: 0; }
 .crumb { all: unset; cursor: pointer; color: var(--green-deep); font-weight: 600; font-size: 15px; display: inline-flex; align-items: center; gap: 6px; }
 .crumb:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
 
 /* ---- Partida rebuda i enganxar-ne l'enllaç ---- */
 .received {
-  display: flex; align-items: center; gap: 10px;
-  margin: 16px 0 -10px; font-size: 15px; font-weight: 700; color: var(--green-deep);
+  margin: 16px 0 -10px; text-align: center;
+  font-size: 15px; font-weight: 700; color: var(--muted);
 }
-.received::before { content: ""; flex: none; width: 20px; height: 2px; background: var(--green); }
 .paste {
   display: block; width: 100%; font: inherit; color: inherit; background: var(--sheet);
   border: 1.5px solid var(--rule); border-radius: var(--r-s); padding: 10px 12px;

@@ -1,7 +1,7 @@
-const CACHE = 'appayo-v7';
+const CACHE = 'appayo-v39';
 const ASSETS = [
-  './', './index.html', './styles.css', './app.js', './logic.js', './chart.js', './symbols.js', './share.js', './tournament.js', './fonts/BricolageGrotesque.woff2',
-  './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png',
+  './', './index.html', './tournament.html', './styles.css', './tournament.css', './app.js', './tournament-app.js', './brand.js', './routes.js', './logic.js', './chart.js', './symbols.js', './share.js', './fonts/BricolageGrotesque.woff2',
+  './manifest.webmanifest', './icons/icon.svg', './icons/icon-header.svg', './icons/icon-192.png',
   './icons/icon-512.png', './icons/icon-512-maskable.png', './icons/icon-180.png',
 ];
 
@@ -19,6 +19,8 @@ self.addEventListener('activate', (e) => {
 // Xarxa primer (per rebre actualitzacions), memòria cau si no hi ha connexió.
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
   e.respondWith(
     fetch(e.request)
       .then((res) => {
@@ -26,6 +28,8 @@ self.addEventListener('fetch', (e) => {
         caches.open(CACHE).then((c) => c.put(e.request, copy));
         return res;
       })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match('./index.html')))
+      .catch(() => caches.match(e.request).then((r) => r || (e.request.mode === 'navigate'
+        ? caches.match(url.pathname.startsWith('/tournaments') ? './tournament.html' : './index.html')
+        : Response.error())))
   );
 });

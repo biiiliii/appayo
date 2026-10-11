@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeGame, decodeShared, shareLink, shareMessage, gameKey } from '../share.js';
+import { encodeGame, decodeShared, normalizeSharedGame, shareLink, legacyShareLink, shareMessage, gameKey } from '../frontend/share.js';
 
 const game = () => ({
   players: ['Núria', 'Mercè', 'Joan'],
@@ -59,6 +59,12 @@ test('tampered data is rejected: rounds that do not add up to 250', () => {
   assert.equal(r.error, 'bad-data');
 });
 
+test('un enllaç amb el Papayoo assignat a qui té menys de 40 punts no és vàlid', () => {
+  const g = game();
+  g.rounds[0] = { papayoo: 1, points: [250, 0, 0] };
+  assert.equal(decodeShared(encodeGame(g)).error, 'bad-data');
+});
+
 test('tampered data is rejected: too few players, or a papayoo nobody holds', () => {
   const few = { ...game(), players: ['Joan', 'Anna'], rounds: [{ papayoo: 0, points: [150, 100] }] };
   assert.equal(decodeShared(encodeGame(few)).error, 'bad-data');
@@ -73,10 +79,25 @@ test('a game with no rounds is not worth sharing', () => {
   assert.equal(decodeShared(encodeGame(empty)).error, 'bad-data');
 });
 
-test('the link hangs the game off the # of the app address', () => {
-  const url = shareLink(game(), 'https://appayo.vercel.app/partida?x=1#p=old');
+test('the short link points to the shared game', () => {
+  const id = 'e66b25e9-a5e5-4b1b-91ee-8dd91ade1c67';
+  assert.equal(shareLink(id, 'https://appayo.vercel.app/partida?x=1#p=old'),
+    `https://appayo.vercel.app/shared/${id}`);
+});
+
+test('the legacy link can still be opened', () => {
+  const url = legacyShareLink(game(), 'https://appayo.vercel.app/partida?x=1#p=old');
   assert.equal(url, `https://appayo.vercel.app/partida#p=${encodeGame(game())}`);
   assert.deepEqual(decodeShared(url).game, game());
+});
+
+test('the server snapshot validates rounds and copies the data', () => {
+  const original = game();
+  const snapshot = normalizeSharedGame({ ...original, roundsPlanned: 4 });
+  assert.deepEqual(snapshot.rounds, original.rounds);
+  original.rounds[0].points[0] = 250;
+  assert.equal(snapshot.rounds[0].points[0], 100);
+  assert.equal(normalizeSharedGame(original), null);
 });
 
 test('the message tells who won, the standings and where to see it all', () => {

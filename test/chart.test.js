@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cumulative, seriesColor } from '../chart.js';
+import { cumulative, seriesColor } from '../frontend/chart.js';
 
 test('cumulative starts at 0 and accumulates each round per player', () => {
   const rounds = [

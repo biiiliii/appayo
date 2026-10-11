@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   TOTAL, PAPAYOO_POINTS, resolveRound, clampPoints,
   totals, standings, createGame, validateSetup, normalizeNames,
-} from '../logic.js';
+} from '../frontend/logic.js';
 
 test('constants', () => {
   assert.equal(TOTAL, 250);
@@ -32,10 +32,29 @@ test('papayoo must be assigned', () => {
   assert.ok(r.errors.includes('papayoo-missing'));
 });
 
-test('papayoo is only an indicator: any points are fine for the holder', () => {
-  const r = resolveRound({ papayoo: 3, points: [100, 50, 80, 20] });
+test('qui té el Papayoo ha de tenir almenys 40 punts', () => {
+  const bad = resolveRound({ papayoo: 3, points: [100, 50, 80, 20] });
+  assert.equal(bad.valid, false);
+  assert.ok(bad.errors.includes('papayoo-points'));
+  const good = resolveRound({ papayoo: 1, points: [100, 40, 80, 30] });
+  assert.equal(good.valid, true);
+});
+
+test('el Papayoo se selecciona sol si només un jugador pot tenir-lo', () => {
+  const r = resolveRound({ papayoo: null, points: [250, null, null] });
   assert.equal(r.valid, true);
-  assert.deepEqual(r.errors, []);
+  assert.equal(r.papayoo, 0);
+  assert.deepEqual(r.points, [250, 0, 0]);
+  const impossible = resolveRound({ papayoo: 1, points: [250, 0, 0] });
+  assert.equal(impossible.valid, false);
+  assert.ok(impossible.errors.includes('papayoo-points'));
+});
+
+test('el Papayoo s’ha de triar si diversos jugadors poden tenir-lo', () => {
+  const r = resolveRound({ papayoo: null, points: [100, 100, 50] });
+  assert.equal(r.valid, false);
+  assert.equal(r.papayoo, null);
+  assert.ok(r.errors.includes('papayoo-missing'));
 });
 
 test('sum above 250 gives a negative remainder error', () => {
