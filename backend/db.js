@@ -1,16 +1,32 @@
 // Persistència dels tornejos. SQLite en local i PostgreSQL (Neon) als desplegaments.
-import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import pg from 'pg';
+import { attachDatabasePool } from '@vercel/functions/db-connections';
 
 let connection;
 let initialized;
 
+// pg ja tracta `sslmode=require` com a verify-full, però avisa que a la v9 deixarà de verificar el
+// certificat. Ho fem explícit: es continua verificant i no surt l'avís a cada arrencada.
+function postgresUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.searchParams.get('sslmode') === 'require') url.searchParams.set('sslmode', 'verify-full');
+    return url.href;
+  } catch {
+    return value;
+  }
+}
+
 function database() {
   if (connection) return connection;
   if (process.env.DATABASE_URL) {
-    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+    const pool = new pg.Pool({ connectionString: postgresUrl(process.env.DATABASE_URL), max: 3 });
+    // Neon tanca les connexions inactives. Sense aquest gestor, l'error d'un client inactiu atura el procés.
+    pool.on('error', err => console.error('Connexió inactiva de PostgreSQL tancada:', err.message));
+    // A Vercel, allarga la instància fins que el pool tanca les connexions inactives.
+    attachDatabasePool(pool);
     const queryWith = async (client, sql, args = []) => {
       let index = 0;
       const converted = sql.replace(/\?/g, () => `$${++index}`);
@@ -35,6 +51,8 @@ function database() {
     };
   } else {
     if (process.env.VERCEL) throw new Error('Falta DATABASE_URL al desplegament.');
+    // Només en local: així a Vercel no es carrega node:sqlite (ni surt l'avís d'experimental).
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
     const file = process.env.SQLITE_PATH || '.data/appayo.sqlite';
     mkdirSync(dirname(file), { recursive: true });
     const sqlite = new DatabaseSync(file);
@@ -102,7 +120,11 @@ export async function db() {
       created_at TIMESTAMPTZ NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL
     )`);
-  })();
+  })().catch(err => {
+    // Si falla (per exemple, mentre Neon es desperta), la petició següent ho torna a provar.
+    initialized = null;
+    throw err;
+  });
   await initialized;
   return conn;
 }

@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "outputDirectory": "frontend",
+  "regions": ["fra1"],
   "rewrites": [
     { "source": "/api/v1/:path*", "destination": "/api/index?path=:path*" },
     { "source": "/game", "destination": "/index.html" },
