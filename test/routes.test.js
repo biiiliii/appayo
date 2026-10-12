@@ -5,8 +5,12 @@ import { tournamentRoute, tournamentPaths, legacyTournamentPath } from '../front
 test('els camins nets identifiquen les pantalles del torneig', () => {
   assert.deepEqual(tournamentRoute('/tournaments'), { mode: 'list' });
   assert.deepEqual(tournamentRoute('/tournaments/new'), { mode: 'new' });
+  assert.deepEqual(tournamentRoute('/tournaments/BCDFG/configure'), { mode: 'configure', value: 'BCDFG' });
   assert.deepEqual(tournamentRoute('/tournaments/abc123'), { mode: 'admin', value: 'abc123' });
+  assert.deepEqual(tournamentRoute('/tournaments/abc123/results'), { mode: 'results', value: 'abc123' });
+  assert.deepEqual(tournamentRoute('/tournaments/abc123/table'), { mode: 'results_table', value: 'abc123' });
   assert.deepEqual(tournamentRoute('/tournaments/spectate/abc123'), { mode: 'view', value: 'abc123' });
+  assert.deepEqual(tournamentRoute('/tournaments/spectate/abc123/table'), { mode: 'public_table', value: 'abc123' });
   assert.deepEqual(tournamentRoute('/tournaments/table/token_1'), { mode: 'table', value: 'token_1' });
   assert.equal(tournamentRoute('/tournaments/table/a/b').mode, 'missing');
 });

@@ -1,11 +1,13 @@
 // API del torneig: el servidor és l'única font dels sortejos, rondes i resultats.
 import { randomBytes, randomUUID, createHash, scryptSync, timingSafeEqual } from 'node:crypto';
+import QRCode from 'qrcode';
 import { db } from './db.js';
 import { PAPAYOO_POINTS } from '../frontend/logic.js';
 import { normalizeSharedGame } from '../frontend/share.js';
+import { reserveTournamentCode } from './code.js';
 import {
-  validateTournament, makeSchedule, createTournament, tableNames,
-  progress, tournamentStandings, awards,
+  validateTournament, tableSizes, makeSchedule, createTournament, tableNames,
+  progress, tournamentStandings, presentationAwards, tableWave, activeWave,
 } from './tournament.js';
 
 const token = () => randomBytes(24).toString('base64url');
@@ -15,6 +17,12 @@ const reply = (body, status = 200) => Response.json(body, {
   headers: { 'Cache-Control': 'no-store' },
 });
 const error = (message, status = 400) => reply({ error: message }, status);
+
+async function qrResponse(url) {
+  const svg = await QRCode.toString(url, { type: 'svg', width: 240, margin: 1,
+    color: { dark: '#15261d', light: '#eef1e8' } });
+  return new Response(svg, { headers: { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store' } });
+}
 
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex');
@@ -68,6 +76,9 @@ async function rowsFor(conn, id) {
 
 function snapshot(row, tableRows, { includeSecrets = false, includeScores = false } = {}) {
   const t = JSON.parse(row.data);
+  if (t.phase === 'configuring') return {
+    id: t.id, name: t.name, createdAt: t.createdAt, phase: 'configuring',
+  };
   const results = {};
   const tables = tableRows.map(item => {
     const rounds = JSON.parse(item.rounds);
@@ -76,25 +87,36 @@ function snapshot(row, tableRows, { includeSecrets = false, includeScores = fals
       players: tableNames(t, item.game_index, item.table_index), rounds,
       receivedAt: Number(item.updated_at),
     };
-    return { game: item.game_index, table: item.table_index, rounds: rounds.length, finished };
+    return { game: item.game_index, table: item.table_index, wave: tableWave(t, item.table_index), rounds: rounds.length, finished };
   });
+  const currentWave = activeWave(t, new Set(Object.keys(results)));
+  for (const table of tables) {
+    table.active = table.game === currentWave?.game && table.wave === currentWave.wave;
+    if (!includeSecrets && table.active && !table.finished)
+      table.entryPath = `/tournaments/table/${t.links[table.game][table.table]}`;
+  }
   const revealStep = Number(row.revealed);
+  const visibleRevealStep = includeSecrets || revealStep >= 8 ? revealStep : 0;
   const view = {
     id: t.id, name: t.name, createdAt: t.createdAt, games: t.games,
     rounds: t.rounds, players: t.players, schedule: t.schedule,
-    revealed: revealStep > 0, revealStep, tables,
+    playersPerTable: t.playersPerTable ?? 5,
+    simultaneousTables: t.simultaneousTables ?? Math.max(...t.schedule.map(game => game.length)),
+    weightUnevenTables: t.weightUnevenTables !== false,
+    currentWave,
+    phase: visibleRevealStep > 0 ? 'results_shown' : 'playing',
+    revealed: visibleRevealStep > 0, revealStep: visibleRevealStep, tables,
     progress: progress({ ...t, results }),
   };
   if (includeSecrets) view.links = t.links;
   if (includeScores) {
     const ranking = tournamentStandings({ ...t, results });
-    const podium = ranking.filter(p => p.played).slice(0, 3);
-    const firstVisible = Math.max(0, 3 - revealStep);
-    view.podium = podium.slice(firstVisible).map(p => ({ rank: p.rank, name: p.name, total: p.total }));
-    if (revealStep >= 4) {
+    const prizes = presentationAwards(ranking);
+    if (revealStep >= 2 && revealStep <= 8) view.award = prizes[revealStep - 2];
+    if (revealStep >= 9) {
       view.results = results;
       view.standings = ranking;
-      view.awards = awards(ranking);
+      view.awards = prizes;
     }
   }
   return view;
@@ -102,27 +124,82 @@ function snapshot(row, tableRows, { includeSecrets = false, includeScores = fals
 
 async function create(conn, request) {
   const body = await readBody(request);
-  const { name, players, games, rounds, password } = body ?? {};
-  if (!Array.isArray(players) || !players.every(p => typeof p === 'string')) return error('La llista de jugadors no és vàlida.');
+  const { name, players, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable, password } = body ?? {};
+  if (typeof name !== 'string' || !name.trim() || name.length > 60) return error('El nom del torneig no és vàlid.');
+  if (typeof password !== 'string' || !password.length) return error('Cal indicar una contrasenya.');
+  if (password.length > 200) return error('La contrasenya és massa llarga.');
+  const initialOnly = players === undefined && games === undefined && rounds === undefined
+    && simultaneousTables === undefined && weightUnevenTables === undefined && playersPerTable === undefined;
+  const clean = initialOnly ? null : validConfiguration({ players, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable });
+  if (!initialOnly && !clean) return error('La configuració del torneig no és vàlida.');
+  const createdAt = Date.now();
+  const passwordHash = hashPassword(password);
+  const id = await reserveTournamentCode(async code => {
+    const draft = { id: code, name: name.trim(), createdAt, phase: 'configuring' };
+    const rows = await conn.query('INSERT INTO tournaments (id, name, password_hash, data, revealed, created_at) VALUES (?, ?, ?, ?, 0, ?) ON CONFLICT (id) DO NOTHING RETURNING id',
+      [code, draft.name, passwordHash, JSON.stringify(draft), createdAt]);
+    return rows.length > 0;
+  });
+  if (clean) await configure(conn, id, { players: clean, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable });
+  return reply({ id, token: await issueSession(conn, id) }, 201);
+}
+
+function validConfiguration({ players, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable }) {
+  if (!Array.isArray(players) || !players.every(p => typeof p === 'string')) return null;
   const clean = players.map(p => p.trim());
-  if (clean.some(p => !p) || validateTournament(clean).length) return error('Els jugadors no són vàlids.');
-  if (typeof name !== 'string' || name.length > 60) return error('El nom del torneig no és vàlid.');
-  if (!Number.isInteger(games) || games < 1 || games > 10 || !Number.isInteger(rounds) || rounds < 1 || rounds > 20)
-    return error('El format del torneig no és vàlid.');
-  if (typeof password !== 'string' || password.length < 12 || password.length > 200)
-    return error('La contrasenya ha de tenir entre 12 i 200 caràcters.');
-  const t = createTournament({ name, players: clean, games, rounds, schedule: makeSchedule(clean.length, games) });
-  t.id = randomBytes(9).toString('base64url');
-  t.links = t.schedule.map(game => game.map(() => token()));
-  await conn.query('INSERT INTO tournaments (id, name, password_hash, data, revealed, created_at) VALUES (?, ?, ?, ?, 0, ?)',
-    [t.id, t.name, hashPassword(password), JSON.stringify(t), t.createdAt]);
-  for (let gi = 0; gi < t.schedule.length; gi++) {
-    for (let ti = 0; ti < t.schedule[gi].length; ti++) {
-      await conn.query('INSERT INTO tournament_tables (token_hash, tournament_id, game_index, table_index) VALUES (?, ?, ?, ?)',
-        [digest(t.links[gi][ti]), t.id, gi, ti]);
+  if (clean.some(p => !p) || validateTournament(clean).length) return null;
+  if (!Number.isInteger(games) || games < 1 || games > 10 || !Number.isInteger(rounds) || rounds < 1 || rounds > 20) return null;
+  if (simultaneousTables !== undefined && (!Number.isInteger(simultaneousTables) || simultaneousTables < 1 || simultaneousTables > 120)) return null;
+  if (weightUnevenTables !== undefined && typeof weightUnevenTables !== 'boolean') return null;
+  if (playersPerTable !== undefined && (!Number.isInteger(playersPerTable) || playersPerTable < 2 || playersPerTable > 8)) return null;
+  return clean;
+}
+
+async function configure(conn, id, body) {
+  const clean = validConfiguration(body ?? {});
+  if (!clean) return error('La configuració del torneig no és vàlida.');
+  return conn.transaction(async tx => {
+    // Aquest UPDATE bloqueja la fila fins al final de la transacció en PostgreSQL.
+    await tx.query('UPDATE tournaments SET name = name WHERE id = ?', [id]);
+    const row = await tournament(tx, id);
+    if (!row) return error('Aquest torneig no existeix.', 404);
+    const draft = JSON.parse(row.data);
+    if (draft.phase !== 'configuring') return error('Aquest torneig ja està configurat.', 409);
+    const desiredPlayers = body.playersPerTable ?? 5;
+    const t = createTournament({
+      name: draft.name, players: clean, games: body.games, rounds: body.rounds,
+      schedule: makeSchedule(clean.length, body.games, Math.random, desiredPlayers),
+      simultaneousTables: body.simultaneousTables ?? tableSizes(clean.length, desiredPlayers).length,
+      weightUnevenTables: body.weightUnevenTables ?? true,
+      playersPerTable: desiredPlayers,
+    });
+    t.id = id;
+    t.createdAt = draft.createdAt;
+    t.phase = 'playing';
+    t.links = t.schedule.map(game => game.map(() => token()));
+    for (let gi = 0; gi < t.schedule.length; gi++) {
+      for (let ti = 0; ti < t.schedule[gi].length; ti++) {
+        await tx.query('INSERT INTO tournament_tables (token_hash, tournament_id, game_index, table_index) VALUES (?, ?, ?, ?)',
+          [digest(t.links[gi][ti]), id, gi, ti]);
+      }
     }
-  }
-  return reply({ id: t.id, token: await issueSession(conn, t.id) }, 201);
+    await tx.query('UPDATE tournaments SET data = ? WHERE id = ?', [JSON.stringify(t), id]);
+    return reply({ id });
+  });
+}
+
+async function renameTournament(conn, id, body) {
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  if (!name || name.length > 60) return error('El nom del torneig no és vàlid.');
+  return conn.transaction(async tx => {
+    await tx.query('UPDATE tournaments SET name = name WHERE id = ?', [id]);
+    const row = await tournament(tx, id);
+    if (!row) return error('Aquest torneig no existeix.', 404);
+    const data = JSON.parse(row.data);
+    data.name = name;
+    await tx.query('UPDATE tournaments SET name = ?, data = ? WHERE id = ?', [name, JSON.stringify(data), id]);
+    return reply({ id, name });
+  });
 }
 
 async function tableByToken(conn, value) {
@@ -171,7 +248,7 @@ export async function handleApi(request, route = new URL(request.url).pathname) 
     const parts = path.split('/').filter(Boolean);
     if (parts[0] === 'shared-games') return sharedGameRoute(conn, request, parts);
     if (request.method === 'POST' && path === '/tournaments') return create(conn, request);
-    if (parts[0] === 'tournaments' && /^[A-Za-z0-9_-]{12}$/.test(parts[1] ?? '')) {
+    if (parts[0] === 'tournaments' && /^[A-Za-z0-9_-]{5,}$/.test(parts[1] ?? '')) {
       const id = parts[1];
       const row = await tournament(conn, id);
       if (!row) return error('Aquest torneig no existeix.', 404);
@@ -179,21 +256,39 @@ export async function handleApi(request, route = new URL(request.url).pathname) 
         const body = await readBody(request);
         if (typeof body?.password !== 'string' || !passwordMatches(body.password, row.password_hash))
           return error('Contrasenya incorrecta.', 401);
-        return reply({ id, token: await issueSession(conn, id) });
+        return reply({ id, name: row.name, token: await issueSession(conn, id) });
       }
       if (request.method === 'GET' && parts[2] === 'status' && parts.length === 3)
-        return reply(snapshot(row, await rowsFor(conn, id), { includeScores: Number(row.revealed) > 0 }));
+        return reply(snapshot(row, await rowsFor(conn, id), { includeScores: Number(row.revealed) >= 8 }));
+      if (request.method === 'GET' && parts[2] === 'qr' && parts.length === 3) {
+        const url = new URL(`/tournaments/spectate/${id}`, request.url).href;
+        return qrResponse(url);
+      }
       if (!await authorize(conn, request, id)) return error('Cal identificar-se com a organitzador.', 401);
+      if (request.method === 'PUT' && parts[2] === 'configure' && parts.length === 3)
+        return configure(conn, id, await readBody(request));
+      if (request.method === 'PUT' && parts[2] === 'name' && parts.length === 3)
+        return renameTournament(conn, id, await readBody(request));
       if (request.method === 'GET' && parts.length === 2)
-        return reply(snapshot(row, await rowsFor(conn, id), { includeSecrets: true, includeScores: Number(row.revealed) > 0 }));
+        return reply(snapshot(row, await rowsFor(conn, id), { includeSecrets: true, includeScores: Number(row.revealed) >= 2 }));
+      if (JSON.parse(row.data).phase === 'configuring') return error('Primer cal configurar el torneig.', 409);
       if (request.method === 'PUT' && parts[2] === 'reveal' && parts.length === 3) {
         const body = await readBody(request);
-        if (!Number.isInteger(body?.step) || body.step < 0 || body.step > 4) return error('L’etapa de la classificació no és vàlida.');
-        if (body.step > 0) {
-          const current = snapshot(row, await rowsFor(conn, id));
-          if (current.progress.received !== current.progress.total) return error('Encara falten taules per acabar.');
-        }
-        await conn.query('UPDATE tournaments SET revealed = ? WHERE id = ?', [body.step, id]);
+        if (!Number.isInteger(body?.step) || body.step < 0 || body.step > 9) return error('L’etapa de la classificació no és vàlida.');
+        const blocked = await conn.transaction(async tx => {
+          // El mateix bloqueig de fila s'utilitza en desar rondes: cap correcció pot travessar l'inici dels resultats.
+          const locked = (await tx.query('UPDATE tournaments SET revealed = revealed WHERE id = ? RETURNING *', [id]))[0];
+          if (body.step === 0 && Number(locked.revealed) > 0)
+            return { message: 'Els resultats ja han començat i no es poden reobrir les puntuacions.', status: 409 };
+          if (body.step > 0) {
+            const current = snapshot(locked, await rowsFor(tx, id));
+            if (current.progress.received !== current.progress.total)
+              return { message: 'Encara falten taules per acabar.', status: 400 };
+          }
+          await tx.query('UPDATE tournaments SET revealed = ? WHERE id = ?', [body.step, id]);
+          return null;
+        });
+        if (blocked) return error(blocked.message, blocked.status);
         return reply({ revealStep: body.step });
       }
     }
@@ -202,19 +297,37 @@ export async function handleApi(request, route = new URL(request.url).pathname) 
       if (!item) return error('Aquest enllaç de taula no és vàlid.', 404);
       const row = await tournament(conn, item.tournament_id);
       const t = JSON.parse(row.data);
+      const tableRows = await rowsFor(conn, t.id);
+      const finishedKeys = new Set(tableRows.filter(r => JSON.parse(r.rounds).length === t.rounds)
+        .map(r => `${r.game_index}-${r.table_index}`));
+      const currentWave = activeWave(t, finishedKeys);
+      const wave = tableWave(t, item.table_index);
+      const active = currentWave?.game === item.game_index && currentWave.wave === wave;
+      const savedRounds = JSON.parse(item.rounds);
       const table = {
         tournamentId: t.id, tournamentName: t.name, game: item.game_index, table: item.table_index,
         players: tableNames(t, item.game_index, item.table_index), roundsPlanned: t.rounds,
-        rounds: JSON.parse(item.rounds), revealed: Boolean(row.revealed),
+        rounds: savedRounds, wave, active, revealed: Boolean(row.revealed),
       };
+      if (request.method === 'GET' && parts[2] === 'qr' && parts.length === 3)
+        return qrResponse(new URL(`/tournaments/table/${parts[1]}`, request.url).href);
       if (request.method === 'GET' && parts.length === 2) return reply(table);
       if (request.method === 'PUT' && parts[2] === 'rounds' && parts.length === 3) {
+        const closedMessage = 'Les puntuacions estan tancades perquè ja han començat els resultats.';
+        if (Number(row.revealed) > 0) return error(closedMessage, 409);
+        if (!active && savedRounds.length === 0) return error('Aquesta taula encara espera el seu torn.', 409);
         const body = await readBody(request);
         const rounds = body?.rounds;
         if (!Array.isArray(rounds) || rounds.length > t.rounds || !rounds.every(r => validateRound(r, table.players.length)))
           return error('Les rondes no són vàlides.');
-        await conn.query('UPDATE tournament_tables SET rounds = ?, updated_at = ? WHERE token_hash = ?',
-          [JSON.stringify(rounds), Date.now(), item.token_hash]);
+        const saved = await conn.transaction(async tx => {
+          const open = await tx.query('UPDATE tournaments SET revealed = revealed WHERE id = ? AND revealed = 0 RETURNING id', [t.id]);
+          if (!open.length) return false;
+          await tx.query('UPDATE tournament_tables SET rounds = ?, updated_at = ? WHERE token_hash = ?',
+            [JSON.stringify(rounds), Date.now(), item.token_hash]);
+          return true;
+        });
+        if (!saved) return error(closedMessage, 409);
         return reply({ saved: rounds.length, finished: rounds.length === t.rounds });
       }
     }

@@ -1,5 +1,5 @@
 // Torneig: sorteig de taules, enllaços per a cada taula i classificació. Sense DOM: es prova amb `node --test`.
-const MIN_PLAYERS = 3;
+const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
 const toBase64Url = bytes => Buffer.from(bytes).toString('base64url');
 const fromBase64Url = value => new Uint8Array(Buffer.from(value, 'base64url'));
@@ -58,10 +58,10 @@ export function fmtPoints(x) {
 
 // ---------- Taules ----------
 
-/** Quantes taules i de quants: entre 4 i 6 sempre que es pugui, i com més iguals millor. */
-export function tableSizes(n) {
-  if (n <= MAX_PLAYERS - 1) return [n];
-  const count = Math.max(1, Math.round(n / REF_SIZE));
+/** Taules tan properes com sigui possible a la mida ideal, sense superar vuit jugadors ni deixar-ne un de sol. */
+export function tableSizes(n, idealPlayers = REF_SIZE) {
+  const count = Math.min(Math.floor(n / MIN_PLAYERS),
+    Math.max(Math.ceil(n / MAX_PLAYERS), Math.round(n / idealPlayers)));
   const base = Math.floor(n / count);
   const extra = n % count;
   return Array.from({ length: count }, (_, i) => base + (i < extra ? 1 : 0));
@@ -136,9 +136,10 @@ function drawGame(n, sizes, met, random) {
  * Prova unes quantes vegades i es queda amb el que repeteix menys parelles.
  * @returns {number[][][]}  schedule[partida][taula] = [jugadors]
  */
-export function makeSchedule(n, games, random = Math.random) {
-  const sizes = tableSizes(n);
-  if (sizes.length === 1) return Array.from({ length: games }, () => [Array.from({ length: n }, (_, i) => i)]);
+export function makeSchedule(n, games, random = Math.random, idealPlayers = REF_SIZE) {
+  const sizes = tableSizes(n, idealPlayers);
+  if (sizes.length === 1) return Array.from({ length: games }, () =>
+    [shuffle(Array.from({ length: n }, (_, i) => i), random)]);
 
   let best = null;
   let bestRepeats = Infinity;
@@ -159,12 +160,13 @@ export function makeSchedule(n, games, random = Math.random) {
         if (c < gameCost) { gameCost = c; gameBest = tables; }
       }
       for (const t of gameBest) for (const p of t) for (const q of t) if (p !== q) met[p][q] += 1;
-      schedule.push(gameBest.map(t => t.slice().sort((a, b) => a - b)));
+      schedule.push(gameBest.map(t => t.slice()));
     }
     const repeats = countRepeats(schedule);
     if (repeats < bestRepeats) { bestRepeats = repeats; best = schedule; }
   }
-  return best;
+  // L'ordre dels seients també forma part del sorteig i es desa amb el torneig.
+  return best.map(game => game.map(table => shuffle(table, random)));
 }
 
 // ---------- Inscrits ----------
@@ -186,7 +188,8 @@ export function validateTournament(players) {
   return errors;
 }
 
-export function createTournament({ name, players, games, rounds, schedule }) {
+export function createTournament({ name, players, games, rounds, schedule, simultaneousTables, weightUnevenTables = true,
+  playersPerTable = REF_SIZE }) {
   const id = Array.from({ length: 8 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('');
   return {
     id,
@@ -196,11 +199,32 @@ export function createTournament({ name, players, games, rounds, schedule }) {
     games,
     rounds,
     schedule,
+    playersPerTable,
+    simultaneousTables: simultaneousTables ?? Math.max(...schedule.map(game => game.length)),
+    weightUnevenTables,
     results: {},
   };
 }
 
 export const tableNames = (t, game, table) => t.schedule[game][table].map(i => t.players[i]);
+
+/** Torn d'una taula dins d'una partida, començant per zero. */
+export function tableWave(t, table) {
+  const limit = Math.max(1, t.simultaneousTables ?? Math.max(...t.schedule.map(game => game.length)));
+  return Math.floor(table / limit);
+}
+
+/** Primer torn amb alguna taula pendent; les partides i els torns avancen en ordre. */
+export function activeWave(t, finishedKeys) {
+  for (let game = 0; game < t.schedule.length; game++) {
+    const waves = Math.ceil(t.schedule[game].length / Math.max(1, t.simultaneousTables ?? t.schedule[game].length));
+    for (let wave = 0; wave < waves; wave++) {
+      if (t.schedule[game].some((_, table) => tableWave(t, table) === wave && !finishedKeys.has(resultKey(game, table))))
+        return { game, wave };
+    }
+  }
+  return null;
+}
 
 // ---------- Enllaç per a cada taula ----------
 
@@ -316,17 +340,25 @@ export function progress(t) {
 
 /** Hi ha taules de mides diferents? Llavors els punts s'igualen a una taula de 5. */
 export function needsScaling(t) {
-  return new Set(t.schedule.flat().map(table => table.length)).size > 1;
+  return t.weightUnevenTables !== false && new Set(t.schedule.flat().map(table => table.length)).size > 1;
+}
+
+/** Mida de taula més habitual; en cas d'empat es conserva la referència més gran. */
+export function referenceTableSize(t) {
+  const counts = new Map();
+  for (const table of t.schedule.flat()) counts.set(table.length, (counts.get(table.length) ?? 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? REF_SIZE;
 }
 
 /**
  * La classificació del torneig, com el full "Resum" de l'Excel. Els punts de les taules de mida
- * diferent es passen a l'equivalent d'una taula de 5 (×mida/5). Per no perdre exactitud es compta
+ * diferent es passen a l'equivalent de la mida més habitual (×mida/referència). Per no perdre exactitud es compta
  * en "unitats" (punts × mida) i només es divideix en acabar.
  * Qui encara no té cap resultat va al final, sense posició.
  */
 export function tournamentStandings(t) {
   const scale = needsScaling(t);
+  const divisor = scale ? referenceTableSize(t) : REF_SIZE;
   const rows = t.players.map((name, index) => ({
     name, index, games: new Array(t.games).fill(null),
     units: 0, played: 0, zeros: 0, papayoos: 0, worstUnits: 0,
@@ -335,12 +367,12 @@ export function tournamentStandings(t) {
   t.schedule.forEach((game, gi) => game.forEach((seats, ti) => {
     const res = t.results[resultKey(gi, ti)];
     if (!res) return;
-    const mult = scale ? seats.length : REF_SIZE;
+    const mult = scale ? seats.length : divisor;
     seats.forEach((p, s) => {
       const row = rows[p];
       const mine = res.rounds.map(r => r.points[s]);
       const raw = sum(mine);
-      row.games[gi] = { raw, points: (raw * mult) / REF_SIZE, table: ti };
+      row.games[gi] = { raw, points: (raw * mult) / divisor, table: ti };
       row.units += raw * mult;
       row.played += 1;
       row.zeros += mine.filter(x => x === 0).length;
@@ -350,8 +382,8 @@ export function tournamentStandings(t) {
   }));
 
   for (const r of rows) {
-    r.total = r.units / REF_SIZE;
-    r.worst = r.worstUnits / REF_SIZE;
+    r.total = r.units / divisor;
+    r.worst = r.worstUnits / divisor;
   }
   rows.sort((a, b) => (b.played > 0) - (a.played > 0) || a.units - b.units || a.index - b.index);
   let rank = null;
@@ -375,14 +407,52 @@ export function awards(rows) {
     return { key, title, detail, unit, names: played.filter(r => get(r) === value).map(r => r.name), value };
   };
   const list = [
-    pick('champion', 'Campió/ona', 'menys punts', r => r.units, Math.min, 'punts'),
-    pick('spoon', 'Cullera de fusta', 'més punts', r => r.units, Math.max, 'punts'),
+    pick('champion', 'Campió/ona', 'menys punts', r => r.total, Math.min, 'punts'),
+    pick('spoon', 'Cullera de fusta', 'més punts', r => r.total, Math.max, 'punts'),
     pick('zeros', 'Més rondes a 0', 'rondes sense cap punt', r => r.zeros, Math.max, 'rondes'),
     pick('papayoo', 'Més Papayoos', 'qui se l\'ha endut més vegades', r => r.papayoos, Math.max, 'Papayoos'),
-    pick('record', 'Rècord en una ronda', 'més punts en una sola ronda', r => r.worstUnits, Math.max, 'punts'),
+    pick('record', 'Rècord en una ronda', 'més punts en una sola ronda', r => r.worst, Math.max, 'punts'),
   ];
-  for (const a of list) if (a.unit === 'punts') a.value /= REF_SIZE;
   return list.filter(a => !((a.key === 'zeros' || a.key === 'papayoo') && a.value === 0));
+}
+
+/** Set premis de la presentació, sempre en el mateix ordre i amb tots els empats. */
+export function presentationAwards(rows) {
+  const played = rows.filter(row => row.played > 0);
+  if (!played.length) return [];
+  const ordinal = rank => ({ 1: 'primer', 2: 'segon', 3: 'tercer', 4: 'quart' })[rank] ?? `${rank}è`;
+  const reference = tied => `el ${ordinal(tied[0].rank)} lloc (${joinNames(tied.map(row => row.name))})`;
+  const maximum = (key, title, description, read, format) => {
+    const value = Math.max(...played.map(read));
+    const next = Math.max(...played.map(read).filter(other => other < value));
+    const difference = Number.isFinite(next) ? value - next : null;
+    const nextRows = difference === null ? [] : played.filter(row => read(row) === next);
+    return { key, title, description, names: played.filter(row => read(row) === value).map(row => row.name),
+      value, difference, statistic: format(value, difference, nextRows) };
+  };
+  const position = (rank, title) => {
+    const winners = played.filter(row => row.rank === rank);
+    if (!winners.length) return { key: `place-${rank}`, title,
+      description: 'Un empat en una posició anterior deixa aquest lloc vacant.', names: [], statistic: 'Sense adjudicar' };
+    const value = winners[0].total;
+    const next = Math.min(...played.map(row => row.total).filter(total => total > value));
+    const difference = Number.isFinite(next) ? next - value : null;
+    const nextRows = difference === null ? [] : played.filter(row => row.total === next);
+    return { key: `place-${rank}`, title, description: rank === 1 ? 'El torneig ja té guanyador!' : 'Un lloc ben merescut al podi.',
+      names: winners.map(row => row.name), value, difference,
+      statistic: `${fmtPoints(value)} punts${difference === null ? '' : ` · ${fmtPoints(difference)} menys que ${reference(nextRows)}`}` };
+  };
+  return [
+    maximum('spoon', 'Major puntuació', 'Algú havia d’endur-se tots aquests punts.', row => row.total,
+      (value, difference, nextRows) => `${fmtPoints(value)} punts${difference === null ? '' : ` · ${fmtPoints(difference)} més que ${reference(nextRows)}`}`),
+    maximum('papayoo', 'Més Papayoos menjats', 'Potser no ha entès que restaven 40 punts!', row => row.papayoos,
+      value => `${value} ${value === 1 ? 'Papayoo' : 'Papayoos'}`),
+    maximum('record', 'Més punts en una ronda', 'Una sola ronda que costarà d’oblidar.', row => row.worst,
+      value => `${fmtPoints(value)} punts en una ronda`),
+    maximum('zeros', 'Més rondes a zero', 'Perfeccionisme, soborn a la resta, o molta sort. No ho sabrem mai.', row => row.zeros,
+      value => `${value} ${value === 1 ? 'ronda' : 'rondes'} a zero`),
+    position(3, 'Tercer lloc'), position(2, 'Segon lloc'), position(1, 'Primer lloc'),
+  ];
 }
 
 export const fmtAward = (a) => (a.unit === 'punts' ? `${fmtPoints(a.value)} punts` : plural(a.value, a.unit === 'rondes' ? 'ronda' : 'Papayoo', a.unit));

@@ -11,11 +11,26 @@ function database() {
   if (connection) return connection;
   if (process.env.DATABASE_URL) {
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
+    const queryWith = async (client, sql, args = []) => {
+      let index = 0;
+      const converted = sql.replace(/\?/g, () => `$${++index}`);
+      return (await client.query(converted, args)).rows;
+    };
     connection = {
-      async query(sql, args = []) {
-        let index = 0;
-        const converted = sql.replace(/\?/g, () => `$${++index}`);
-        return (await pool.query(converted, args)).rows;
+      query(sql, args = []) { return queryWith(pool, sql, args); },
+      async transaction(work) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const result = await work({ query: (sql, args = []) => queryWith(client, sql, args) });
+          await client.query('COMMIT');
+          return result;
+        } catch (err) {
+          await client.query('ROLLBACK');
+          throw err;
+        } finally {
+          client.release();
+        }
       },
     };
   } else {
@@ -24,10 +39,31 @@ function database() {
     mkdirSync(dirname(file), { recursive: true });
     const sqlite = new DatabaseSync(file);
     sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
+    let transactionTail = Promise.resolve();
+    const query = async (sql, args = []) => {
+      const stmt = sqlite.prepare(sql);
+      return /^\s*SELECT\b|\bRETURNING\b/i.test(sql) ? stmt.all(...args) : (stmt.run(...args), []);
+    };
     connection = {
-      async query(sql, args = []) {
-        const stmt = sqlite.prepare(sql);
-        return /^\s*SELECT\b/i.test(sql) ? stmt.all(...args) : (stmt.run(...args), []);
+      query,
+      async transaction(work) {
+        const previous = transactionTail;
+        let release;
+        transactionTail = new Promise(resolve => { release = resolve; });
+        await previous;
+        try {
+          sqlite.exec('BEGIN IMMEDIATE');
+          try {
+            const result = await work({ query });
+            sqlite.exec('COMMIT');
+            return result;
+          } catch (err) {
+            sqlite.exec('ROLLBACK');
+            throw err;
+          }
+        } finally {
+          release();
+        }
       },
     };
   }
