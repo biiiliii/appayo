@@ -59,10 +59,18 @@ test('tampered data is rejected: rounds that do not add up to 250', () => {
   assert.equal(r.error, 'bad-data');
 });
 
-test('un enllaç amb el Papayoo assignat a qui té menys de 40 punts no és vàlid', () => {
+test('un enllaç antic amb el Papayoo a qui té menys de 40 punts s’obre igualment', () => {
+  // L'app anterior no ho comprovava: aquests enllaços ja corren pel WhatsApp.
   const g = game();
   g.rounds[0] = { papayoo: 1, points: [250, 0, 0] };
-  assert.equal(decodeShared(encodeGame(g)).error, 'bad-data');
+  const moved = decodeShared(encodeGame(g));
+  assert.equal(moved.ok, true);
+  assert.deepEqual(moved.game.rounds[0], { papayoo: 0, points: [250, 0, 0] }, 'només el primer pot tenir-lo');
+
+  g.rounds[0] = { papayoo: 2, points: [125, 125, 0] };
+  const kept = decodeShared(encodeGame(g));
+  assert.equal(kept.ok, true);
+  assert.deepEqual(kept.game.rounds[0], { papayoo: 2, points: [125, 125, 0] }, 'si és dubtós, es mostra com va arribar');
 });
 
 test('tampered data is rejected: too few players, or a papayoo nobody holds', () => {

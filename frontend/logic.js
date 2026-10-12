@@ -48,15 +48,16 @@ export function resolveRound({ papayoo, points }) {
     errors.push('over-total');
   }
 
-  const complete = resolved.every(p => p !== null && p !== undefined) && remaining === 0 && errors.length === 0;
+  // Completa també quan l'últim jugador rep la resta: `remaining` es calcula abans d'omplir-lo.
+  const complete = errors.length === 0 && resolved.every(p => p !== null && p !== undefined)
+    && resolved.reduce((a, p) => a + p, 0) === TOTAL;
   const candidates = complete ? resolved.flatMap((p, i) => p >= PAPAYOO_POINTS ? [i] : []) : [];
   const selected = papayoo === null || papayoo === undefined
     ? (candidates.length === 1 ? candidates[0] : null)
     : papayoo;
   if (!Number.isInteger(selected) || selected < 0 || selected >= points.length) errors.push('papayoo-missing');
-  else if (resolved[selected] !== null && resolved[selected] !== undefined && resolved[selected] < PAPAYOO_POINTS) {
-    errors.push('papayoo-points');
-  }
+  // Mentre encara s'escriuen els punts (1, 10, 100...) no es marca l'error dels 40 punts.
+  else if (complete && resolved[selected] < PAPAYOO_POINTS) errors.push('papayoo-points');
 
   const unique = [...new Set(errors)];
   return {

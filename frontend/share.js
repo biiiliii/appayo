@@ -68,6 +68,14 @@ export function normalizeSharedGame(value) {
 const fail = (error) => ({ ok: false, error });
 const isInt = (v) => Number.isInteger(v);
 
+// Els enllaços antics no comprovaven que qui tenia el Papayoo en tingués els 40 punts. Si només un
+// jugador els pot tenir, la marca passa a ell; si no, l'enllaç es continua obrint tal com va arribar.
+function legacyPapayoo(papayoo, points) {
+  if (points[papayoo] >= PAPAYOO_POINTS) return papayoo;
+  const candidates = points.flatMap((p, i) => (p >= PAPAYOO_POINTS ? [i] : []));
+  return candidates.length === 1 ? candidates[0] : papayoo;
+}
+
 /**
  * Llegeix una partida d'un enllaç, d'un missatge sencer enganxat o del tros codificat tot sol.
  * @returns {{ok: true, game: object} | {ok: false, error: 'bad-link'|'bad-version'|'bad-data'}}
@@ -99,8 +107,7 @@ export function decodeShared(text) {
     if (papayoo < 0 || papayoo >= n) return fail('bad-data');
     if (points.some(p => p < 0 || p > TOTAL)) return fail('bad-data');
     if (points.reduce((a, p) => a + p, 0) !== TOTAL) return fail('bad-data');
-    if (points[papayoo] < PAPAYOO_POINTS) return fail('bad-data');
-    rounds.push({ papayoo, points });
+    rounds.push({ papayoo: legacyPapayoo(papayoo, points), points });
   }
 
   const game = { players: players.slice(), rounds, createdAt: data.c, endedAt: data.e };

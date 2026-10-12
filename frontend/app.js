@@ -67,6 +67,9 @@ let serverSharedGame = null;
 let serverSharedError = null;
 let serverSharedLoading = false;
 const sharing = new Set();
+let pasting = false;
+let pasteError = null;
+let pasteText = '';
 
 function load() {
   try {
@@ -121,9 +124,19 @@ function confirmGameAction({ title, message, action, danger = false }) {
       dialog.remove();
       resolve(confirmed);
     }, { once: true });
+    // iOS anteriors a la 15.4 no tenen <dialog>: s'hi fa servir la confirmació del sistema.
+    if (typeof dialog.showModal !== 'function') { resolve(confirm(`${title}\n\n${message}`)); return; }
     document.body.append(dialog);
     dialog.showModal();
   });
+}
+
+/** Obre un diàleg informatiu; sense <dialog> (iOS < 15.4) es fa servir `fallback`. */
+function showDialog(dialog, fallback) {
+  if (typeof dialog.showModal !== 'function') { fallback(); return; }
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  document.body.append(dialog);
+  dialog.showModal();
 }
 
 async function finishCurrentGame() {
@@ -131,11 +144,11 @@ async function finishCurrentGame() {
   if (!game) return;
   const hasRounds = game.rounds.length > 0;
   const confirmed = await confirmGameAction(hasRounds ? {
-    title: '🏁 Finalitzar la partida?',
+    title: 'Finalitzar la partida?',
     message: `Es desarà a l’historial amb ${fmtRounds(game.rounds.length)} i tot seguit en veuràs els resultats.`,
     action: 'Finalitza la partida',
   } : {
-    title: '🗑️ Eliminar la partida?',
+    title: 'Eliminar la partida?',
     message: 'Encara no hi ha cap ronda jugada. La partida s’eliminarà i no apareixerà a l’historial.',
     action: 'Elimina la partida', danger: true,
   });
@@ -201,39 +214,85 @@ async function shareGame(g, { copyOnly = false } = {}) {
     players: g.players, rounds: g.rounds, roundsPlanned: g.roundsPlanned,
     createdAt: g.createdAt, endedAt: g.endedAt ?? Date.now(), ...(g.tour ? { tour: g.tour } : {}),
   });
-  if (!snapshot) { toast('Aquesta partida encara no es pot compartir.'); return; }
+  if (!snapshot) {
+    // Partides d'abans, quan no es comprovava que qui tenia el Papayoo en tingués els 40 punts.
+    const bad = g.rounds.findIndex(r => !(r.points[r.papayoo] >= PAPAYOO_POINTS));
+    const saved = state.games.some(x => x.id === g.id);
+    if (bad < 0 || (!saved && g !== state.game)) { toast('Aquesta partida encara no es pot compartir.'); return; }
+    const fix = await confirmGameAction({
+      title: `Cal arreglar la ronda ${bad + 1}`,
+      message: `Hi consta que el Papayoo se l’ha endut algú amb menys de ${PAPAYOO_POINTS} punts. Arregla-la i després la podràs compartir.`,
+      action: 'Arregla la ronda',
+    });
+    if (fix) startEdit(saved ? g.id : null, bad, saved ? 'detail' : 'game', 'rounds');
+    return;
+  }
+  const origin = `${location.origin}/`;
+  // Sense connexió, l'enllaç antic porta tota la partida a dins i s'obre igual.
+  if (navigator.onLine === false) { await sendShare(snapshot, legacyShareLink(snapshot, origin), copyOnly); return; }
+  const known = sharedLinks()[key];
+  if (known?.id && known?.writeToken) {
+    // El menú de compartir només s'obre just després del toc: s'envia ja i la còpia del servidor s'actualitza alhora.
+    updateSharedCopy(key, known, snapshot);
+    await sendShare(snapshot, shareLink(known.id, origin), copyOnly);
+    return;
+  }
   sharing.add(key);
   render();
+  let link;
   try {
-    const links = sharedLinks();
-    let saved = links[key];
-    let response;
-    if (saved?.id && saved?.writeToken) {
-      response = await fetch(`/api/v1/shared-games/${saved.id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${saved.writeToken}` },
-        body: JSON.stringify({ game: snapshot }),
-      });
-      if (response.status === 401 || response.status === 404) saved = null;
-      else if (!response.ok) throw new Error('No s’ha pogut actualitzar la partida.');
-    }
-    if (!saved) {
-      response = await fetch('/api/v1/shared-games', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game: snapshot }),
-      });
-      if (!response.ok) throw new Error('No s’ha pogut desar la partida.');
-      saved = await response.json();
-      links[key] = saved;
-      localStorage.setItem(SHARED_KEY, JSON.stringify(links));
-    }
-    const link = shareLink(saved.id, `${location.origin}/`);
-    const message = shareMessage(snapshot, link);
-    await (copyOnly ? copyShareText(message) : shareText(message));
+    const saved = await api('/api/v1/shared-games', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ game: snapshot }),
+    });
+    localStorage.setItem(SHARED_KEY, JSON.stringify({ ...sharedLinks(), [key]: saved }));
+    link = shareLink(saved.id, origin);
   } catch (err) {
-    toast(err.message || 'No s’ha pogut compartir la partida. Comprova la connexió.');
+    if (!err.offline && !(err.status >= 500)) { toast(err.message); return; }
+    link = legacyShareLink(snapshot, origin);
   } finally {
     sharing.delete(key);
     render();
   }
+  // Si el servidor ha trigat, el navegador ja no obre el menú de compartir sense un toc nou.
+  if (copyOnly || navigator.userActivation?.isActive !== false) await sendShare(snapshot, link, copyOnly);
+  else offerShare(shareMessage(snapshot, link));
+}
+
+/** Les crides a l'API, amb un temps màxim i errors en català encara que no hi hagi connexió. */
+async function api(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(path, { ...options, signal: AbortSignal.timeout?.(10000) });
+  } catch {
+    throw Object.assign(new Error('No hi ha connexió amb el servidor. Torna-ho a provar.'), { offline: true });
+  }
+  const body = (response.headers.get('content-type') ?? '').includes('application/json')
+    ? await response.json().catch(() => null) : null;
+  if (!response.ok) {
+    throw Object.assign(new Error(body?.error || 'El servidor no ha pogut respondre. Torna-ho a provar.'), { status: response.status });
+  }
+  return body;
+}
+
+async function updateSharedCopy(key, known, snapshot) {
+  try {
+    await api(`/api/v1/shared-games/${known.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${known.writeToken}` },
+      body: JSON.stringify({ game: snapshot }),
+    });
+  } catch (err) {
+    if (err.status !== 401 && err.status !== 404) return;
+    // Aquest enllaç ja no es pot actualitzar: el pròxim cop se'n farà un de nou.
+    const links = sharedLinks();
+    delete links[key];
+    localStorage.setItem(SHARED_KEY, JSON.stringify(links));
+    toast('Aquest enllaç ja no es pot actualitzar. Torna a compartir la partida per tenir-ne un de nou.');
+  }
+}
+
+async function sendShare(snapshot, link, copyOnly) {
+  const message = shareMessage(snapshot, link);
+  await (copyOnly ? copyShareText(message) : shareText(message));
 }
 
 /** El menú de compartir del mòbil (WhatsApp...), o copiar el text si no n'hi ha. */
@@ -246,8 +305,23 @@ async function shareText(text) {
 }
 
 async function copyShareText(text) {
-  try { await navigator.clipboard.writeText(text); toast('Enllaç copiat'); }
-  catch { showShareText(text); }
+  try {
+    // Sense un toc recent, alguns navegadors no responen mai: llavors es mostra el text per copiar-lo.
+    await Promise.race([navigator.clipboard.writeText(text), new Promise((_, reject) => setTimeout(reject, 2000))]);
+    toast('Enllaç copiat');
+  } catch { showShareText(text); }
+}
+
+/** El servidor ha trigat: un toc nou obre el menú de compartir. */
+function offerShare(text) {
+  const dialog = h('dialog', { class: 'game-dialog' },
+    h('h2', null, 'La partida ja es pot enviar'),
+    h('p', null, 'Toca el botó per triar a qui l’envies.'),
+    h('div', { class: 'game-dialog-actions' },
+      h('button', { class: 'btn outline', type: 'button', onclick: () => dialog.close() }, 'Tanca'),
+      h('button', { class: 'btn', type: 'button', onclick: () => { dialog.close(); shareText(text); } }, 'Comparteix')),
+  );
+  showDialog(dialog, () => shareText(text));
 }
 
 function showShareText(text) {
@@ -262,9 +336,7 @@ function showShareText(text) {
         catch { toast('Selecciona el text per copiar-lo.'); }
       } }, 'Copia el missatge')),
   );
-  dialog.addEventListener('close', () => dialog.remove(), { once: true });
-  document.body.append(dialog);
-  dialog.showModal();
+  showDialog(dialog, () => window.prompt('Copia el missatge per enviar-lo:', text));
 }
 
 const shareButton = (g) => {
@@ -459,7 +531,7 @@ function renderSetup() {
       st.setup.roundsPlanned = validRounds(value) ? Number(value) : null;
     }
   });
-  const roundChoice = (mode, label, extra = null) => h('div', { class: 'round-option',
+  const roundChoice = (mode, label, extra = null) => h('div', { class: `round-option${roundMode === mode ? ' is-selected' : ''}`,
     onclick: event => { if (event.target === event.currentTarget) selectRoundMode(mode); },
   },
     h('input', { type: 'radio', name: 'round-mode', id: `round-${mode}`, checked: roundMode === mode,
@@ -478,13 +550,14 @@ function renderSetup() {
         s.roundMode = 'custom';
         s.roundsPlanned = validRounds(value) ? Number(value) : null;
         document.getElementById('round-custom').checked = true;
+        for (const option of document.querySelectorAll('.round-option')) option.classList.toggle('is-selected', option.contains(event.target));
         save();
       },
     })),
   );
 
   const resume = state.game ? h('section', { class: 'section resume-card' },
-    h('h2', { class: 'section-title' }, h('span', { 'aria-hidden': 'true' }, '🃏 '), 'Partida en curs'),
+    h('h2', { class: 'section-title' }, 'Partida en curs'),
     h('p', { class: 'lede' }, `${state.game.players.join(', ')}. ${state.game.rounds.length === 1 ? 'Una ronda jugada' : `${state.game.rounds.length} rondes jugades`}.`),
     h('div', { class: 'resume-actions' },
       h('button', { class: 'btn', type: 'button', onclick: () => go('game') }, 'Continua la partida'),
@@ -532,11 +605,11 @@ function renderSetup() {
           if (previousGame) {
             const hasRounds = previousGame.rounds.length > 0;
             const confirmed = await confirmGameAction(hasRounds ? {
-              title: '🃏 Començar una altra partida?',
+              title: 'Començar una altra partida?',
               message: `La partida oberta es finalitzarà i es desarà a l’historial amb ${fmtRounds(previousGame.rounds.length)}. Després començarà la partida nova.`,
               action: 'Finalitza i comença',
             } : {
-              title: '🗑️ Començar una altra partida?',
+              title: 'Començar una altra partida?',
               message: 'La partida oberta no té cap ronda: s’eliminarà i començarà la partida nova.',
               action: 'Elimina i comença', danger: true,
             });
@@ -576,7 +649,7 @@ function renderGame() {
     tab === 'overview' ? renderStandings(g, finished) : null,
     tab === 'points' && !finished ? newRoundEntry(g) : null,
     tab === 'rounds' && g.rounds.length
-      ? roundsSection(g, finished ? null : ri => startEdit(null, ri, 'game', tab)) : null,
+      ? roundsSection(g, ri => startEdit(null, ri, 'game', tab)) : null,
     tab === 'rounds' && g.rounds.length
       ? section('Com ha anat', 'acumulat, menys és millor', renderChart(g.players, g.rounds), legend(g.players)) : null,
     tab !== 'points' ? h('div', { class: `actions center${progressActions ? ' game-progress-actions' : ''}` },
@@ -592,7 +665,7 @@ function renderGame() {
       finished ? null : h('button', {
         class: g.rounds.length ? 'btn outline' : 'btn quiet', type: 'button',
         onclick: finishCurrentGame,
-      }, g.rounds.length ? '🏁 Finalitza la partida' : 'Cancel·la la partida'),
+      }, g.rounds.length ? 'Finalitza la partida' : 'Cancel·la la partida'),
     ) : null,
   );
 }
@@ -760,7 +833,7 @@ function legend(players) {
 
 /** @param onEdit  si hi és, clicar una ronda n'obre l'edició */
 function roundsSection(g, onEdit) {
-  return section('Ronda a ronda', onEdit ? 'Clica una ronda per editar-la' : null, renderRoundsTable(g, onEdit));
+  return section('Ronda a ronda', onEdit ? 'Toca una ronda per arreglar-la' : null, renderRoundsTable(g, onEdit));
 }
 
 function renderRoundsTable(g, onEdit) {
@@ -814,8 +887,8 @@ function historyIcon(kind) {
 
 async function deleteHistoryGame(g) {
   const confirmed = await confirmGameAction({
-    title: '🗑️ Esborrar de l’historial?',
-    message: 'Aquesta partida s’esborrarà d’aquest dispositiu i no es podrà recuperar. Si l’has compartit, l’enllaç continuarà funcionant.',
+    title: 'Esborrar de l’historial?',
+    message: 'Aquesta partida s’esborrarà d’aquest dispositiu i no es podrà recuperar. Si l’has compartida, l’enllaç continuarà funcionant.',
     action: 'Esborra de l’historial', danger: true,
   });
   if (!confirmed || !state.games.some(x => x.id === g.id)) return;
@@ -834,7 +907,7 @@ function renderHistory() {
         h('button', { class: 'history-open', type: 'button', onclick: () => go('detail', { viewing: g.id }),
           'aria-label': `Obre la partida del ${fmtShortDate(g.endedAt)}` },
         h('span', { class: 'history-players' }, rows.map(r => h('span', { class: `history-player${r.rank === 1 ? ' first' : ''}` },
-          r.rank === 1 ? h('span', { class: 'history-crown', role: 'img', 'aria-label': 'Guanyador' }, '👑') : null,
+          r.rank === 1 ? h('span', { class: 'sr-only' }, 'Guanyador: ') : null,
           h('span', { class: 'history-name' }, r.name),
           h('span', { class: 'history-points' }, ` · ${r.total} punts`),
         ))),
@@ -872,7 +945,7 @@ function renderHistory() {
         onclick: async () => {
           const count = state.games.length;
           const confirmed = await confirmGameAction({
-            title: '🗑️ Esborrar tot l’historial?',
+            title: 'Esborrar tot l’historial?',
             message: `${count === 1 ? 'La partida desada s’esborrarà' : `Les ${count} partides desades s’esborraran`} d’aquest dispositiu i no es podran recuperar. Els enllaços compartits continuaran funcionant.`,
             action: 'Esborra tot l’historial', danger: true,
           });
@@ -883,7 +956,51 @@ function renderHistory() {
         },
       }, 'Esborra tot l\'historial')) : null,
     ),
+    section('T\'han enviat una partida?', null, renderPaste()),
   );
+}
+
+/** Per a qui rep l'enllaç i se li obre al navegador en lloc de l'app (als iPhone passa): copiar-lo i enganxar-lo aquí. */
+function renderPaste() {
+  if (!pasting) {
+    return h('div', null,
+      h('button', {
+        class: 'btn outline block', type: 'button',
+        onclick: () => { pasting = true; pasteError = null; render(); },
+      }, 'Enganxa l\'enllaç que t\'han enviat'),
+      h('p', { class: 'note' }, 'Copia el missatge o l\'enllaç del WhatsApp i enganxa\'l aquí per veure la partida i desar-la en aquesta app.'),
+    );
+  }
+  return h('div', null,
+    h('textarea', {
+      class: 'paste', id: 'paste-field', rows: 3, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+      placeholder: 'Enganxa aquí el missatge o l\'enllaç',
+      'aria-label': 'Enllaç de la partida',
+      oninput: (e) => { pasteText = e.target.value; },
+    }, pasteText),
+    pasteError ? h('p', { class: 'error' }, SHARE_ERROR_TEXT[pasteError] ?? SHARE_ERROR_TEXT['bad-link']) : null,
+    h('div', { class: 'actions end' },
+      h('button', {
+        class: 'btn quiet', type: 'button',
+        onclick: () => { pasting = false; pasteError = null; pasteText = ''; render(); },
+      }, 'Deixa-ho estar'),
+      h('button', { class: 'btn', type: 'button', onclick: openPasted }, 'Obre l\'enllaç'),
+    ),
+  );
+}
+
+function openPasted() {
+  const server = pasteText.match(/\/shared\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/i);
+  if (server) {
+    pasting = false; pasteError = null; pasteText = '';
+    go('serverShared', { serverSharedId: server[1] });
+    return;
+  }
+  const read = decodeShared(pasteText);
+  if (!read.ok) { pasteError = read.error; render(); return; }
+  readLink(pasteText);
+  pasting = false; pasteError = null; pasteText = '';
+  go('shared');
 }
 
 /** Una partida compartida de dalt a baix; a l'historial els detalls tenen pestanya pròpia. */
@@ -916,7 +1033,7 @@ function renderDetail() {
       h('button', { class: 'crumb', type: 'button', onclick: () => go('history') }, '← Torna a l’historial')),
     state.gameTab === 'rounds'
       ? [
-        roundsSection(g),
+        roundsSection(g, ri => startEdit(g.id, ri, 'detail', 'rounds')),
         section('Com va anar', 'acumulat, menys és millor', renderChart(g.players, g.rounds), legend(g.players)),
       ]
       : gameReport(g, `${fmtDate(g.endedAt)}, ${fmtRounds(g.rounds.length)}`, null, false),
@@ -972,7 +1089,23 @@ function renderEdit() {
         leaveEdit();
         toast(`Ronda ${e.round + 1} arreglada`);
       },
-      extra: h('div', { class: 'actions center' }, h('button', { class: 'btn quiet', type: 'button', onclick: cancel }, 'Deixa-ho estar')),
+      extra: h('div', { class: 'actions center' },
+        h('button', { class: 'btn quiet', type: 'button', onclick: cancel }, 'Deixa-ho estar'),
+        // Com l'antic «Desfés l'última ronda»: per si s'ha desat una ronda que no tocava.
+        !e.gameId && e.round === g.rounds.length - 1 ? h('button', {
+          class: 'btn quiet danger', type: 'button',
+          onclick: async () => {
+            const confirmed = await confirmGameAction({
+              title: `Esborrar la ronda ${e.round + 1}?`,
+              message: 'Se’n treuen tots els punts, com si no s’hagués jugat.',
+              action: 'Esborra la ronda', danger: true,
+            });
+            if (!confirmed || state.edit !== e) return;
+            setState(st => { st.game.rounds.pop(); });
+            go('game', { edit: null, gameTab: 'overview' });
+            toast(`Ronda ${e.round + 1} esborrada`);
+          },
+        }, 'Esborra aquesta ronda') : null),
     }),
   );
 }
@@ -992,18 +1125,30 @@ function renderShared() {
   }
   const g = incoming;
   if (!g) return renderSetup();
-  const already = state.games.some(x => gameKey(x) === gameKey(g));
-
   return h('div', null,
     masthead(back),
     h('p', { class: 'received' }, 'T\'han enviat aquesta partida'),
     gameReport(g, `${fmtDate(g.endedAt)}, ${fmtRounds(g.rounds.length)}`),
-    h('div', { class: 'actions center' },
-      already
-        ? h('p', { class: 'note' }, 'Aquesta partida ja la tens desada.')
-        : h('button', { class: 'btn', type: 'button', onclick: () => saveIncoming(g) }, 'Desa-la a les meves partides'),
-    ),
+    h('div', { class: 'actions center' }, receivedActions(g)),
   );
+}
+
+/** Desar una partida rebuda, o posar-ne al dia la còpia si qui l'envia hi ha arreglat o afegit rondes. */
+function receivedActions(g) {
+  const copy = state.games.find(x => gameKey(x) === gameKey(g));
+  if (!copy) return h('button', { class: 'btn', type: 'button', onclick: () => saveIncoming(g) }, 'Desa-la a les meves partides');
+  if (JSON.stringify(copy.rounds) === JSON.stringify(g.rounds)) return h('p', { class: 'note' }, 'Aquesta partida ja la tens desada.');
+  return h('button', {
+    class: 'btn', type: 'button',
+    onclick: () => {
+      setState(st => {
+        const saved = st.games.find(x => x.id === copy.id);
+        saved.rounds = g.rounds.map(r => ({ papayoo: r.papayoo, points: r.points.slice() }));
+        saved.endedAt = g.endedAt;
+      });
+      toast('Còpia actualitzada');
+    },
+  }, 'Actualitza la meva còpia');
 }
 
 async function loadServerShared(id) {
@@ -1013,14 +1158,14 @@ async function loadServerShared(id) {
   serverSharedLoading = true;
   if (state.screen === 'serverShared') render();
   try {
-    const response = await fetch(`/api/v1/shared-games/${encodeURIComponent(id)}`, { cache: 'no-store' });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error || 'No s’ha pogut obrir la partida.');
-    const game = normalizeSharedGame(body.game);
+    const body = await api(`/api/v1/shared-games/${encodeURIComponent(id)}`, { cache: 'no-store' });
+    const game = normalizeSharedGame(body?.game);
     if (!game) throw new Error('Les dades de la partida no són vàlides.');
     if (serverSharedId === id) serverSharedGame = game;
   } catch (err) {
-    if (serverSharedId === id) serverSharedError = err.message || 'No s’ha pogut obrir la partida.';
+    if (serverSharedId === id) {
+      serverSharedError = err.offline ? 'No hi ha connexió. Comprova-la i torna-ho a provar.' : err.message;
+    }
   } finally {
     if (serverSharedId === id) {
       serverSharedLoading = false;
@@ -1054,16 +1199,13 @@ function renderServerShared() {
       serverSharedError ? h('p', { class: 'lede' }, serverSharedError) : null,
       !serverSharedLoading ? h('button', { class: 'btn', type: 'button', onclick: () => loadServerShared(serverSharedId) }, 'Torna-ho a provar') : null),
   );
-  const already = state.games.some(x => gameKey(x) === gameKey(g));
   return h('div', null,
     masthead(null, serverSharedNavigation(g), undefined, home),
     h('p', { class: 'received' }, 'T’han enviat aquesta partida'),
     serverSharedTab === 'rounds'
       ? [roundsSection(g), section('Com va anar', 'acumulat, menys és millor', renderChart(g.players, g.rounds), legend(g.players))]
       : gameReport(g, `${fmtDate(g.endedAt)}, ${fmtRounds(g.rounds.length)}`, null, false),
-    h('div', { class: 'actions center' },
-      already ? h('p', { class: 'note' }, 'Aquesta partida ja la tens desada.')
-        : h('button', { class: 'btn', type: 'button', onclick: () => saveIncoming(g) }, 'Desa-la a les meves partides')),
+    h('div', { class: 'actions center' }, receivedActions(g)),
   );
 }
 
@@ -1140,9 +1282,16 @@ function screenFromPath() {
   const screen = readHash();
   if (screen) state.screen = screen;
   else {
-    const pathScreen = screenFromPath();
-    if (pathScreen) state.screen = pathScreen;
-    else state.screen = 'setup';
+    // L'app instal·lada sempre s'obre a «/»: si s'havia tancat enmig d'una partida o d'una correcció, s'hi torna.
+    if (location.pathname === '/' && !location.search) {
+      const editing = state.edit && (state.edit.gameId ? state.games.some(g => g.id === state.edit.gameId) : state.game);
+      if (state.screen === 'edit' && editing) {
+        history.replaceState(null, '', `/game/${encodeURIComponent(state.edit.gameId || state.game.id)}/edit`);
+      } else if (state.screen === 'game' && state.game) {
+        history.replaceState(null, '', gamePath(state.game.id, state.gameTab));
+      }
+    }
+    state.screen = screenFromPath() || 'setup';
   }
 }
 render();

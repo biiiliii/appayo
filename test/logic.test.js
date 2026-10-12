@@ -50,6 +50,19 @@ test('el Papayoo se selecciona sol si només un jugador pot tenir-lo', () => {
   assert.ok(impossible.errors.includes('papayoo-points'));
 });
 
+test('el Papayoo també se selecciona sol quan l’últim jugador rep la resta', () => {
+  const r = resolveRound({ papayoo: null, points: [10, 200, 30, null] });
+  assert.equal(r.auto, 3);
+  assert.equal(r.papayoo, 1);
+  assert.equal(r.valid, true);
+});
+
+test('mentre s’escriuen els punts de qui té el Papayoo no surt l’error dels 40 punts', () => {
+  const typing = resolveRound({ papayoo: 0, points: [10, null, null] });
+  assert.equal(typing.valid, false);
+  assert.ok(!typing.errors.includes('papayoo-points'));
+});
+
 test('el Papayoo s’ha de triar si diversos jugadors poden tenir-lo', () => {
   const r = resolveRound({ papayoo: null, points: [100, 100, 50] });
   assert.equal(r.valid, false);
