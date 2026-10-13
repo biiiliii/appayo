@@ -80,3 +80,12 @@ test('les taules previstes tenen almenys 3 jugadors i com a màxim 8', () => {
     }
   }
 });
+
+test('el nombre de taules que proposa el formulari coincideix amb el sorteig del servidor', async () => {
+  const { tableSizes } = await import('../backend/tournament.js');
+  for (let players = 3; players <= 120; players++) {
+    for (let ideal = 3; ideal <= 8; ideal++) {
+      assert.equal(suggestedTableCount(players, ideal), tableSizes(players, ideal).length, `${players} jugadors, ${ideal} per taula`);
+    }
+  }
+});

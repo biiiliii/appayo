@@ -1,4 +1,4 @@
-const CACHE = 'appayo-v112';
+const CACHE = 'appayo-v113';
 const ASSETS = [
   './', './index.html', './tournament.html', './styles.css', './tournament.css', './app.js', './tournament-app.js', './tournament-progress.js', './brand.js', './routes.js', './logic.js', './chart.js', './symbols.js', './share.js', './legacy-tournament.js', './fonts/BricolageGrotesque.woff2',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-header.svg', './icons/icon-192.png',
