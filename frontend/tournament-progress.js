@@ -34,3 +34,9 @@ export function visibleTournamentWaves(data) {
   else if (game + 1 < data.schedule.length) visible.push({ game: game + 1, wave: 0 });
   return visible;
 }
+
+/** Taules que farà el sorteig: la mateixa fórmula que `tableSizes` del servidor (de 3 a 8 jugadors per taula). */
+export function suggestedTableCount(players, playersPerTable = 5) {
+  return Math.max(1, Math.min(Math.floor(players / 3),
+    Math.max(Math.ceil(players / 8), Math.round(players / (Number(playersPerTable) || 5)))));
+}

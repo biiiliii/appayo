@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tournamentRoute, tournamentPaths, legacyTournamentPath } from '../frontend/routes.js';
+import {
+  tournamentRoute, tournamentPaths, legacyTournamentPath, normalizedTournamentId, canonicalTournamentRoute,
+} from '../frontend/routes.js';
 
 test('els camins nets identifiquen les pantalles del torneig', () => {
   assert.deepEqual(tournamentRoute('/tournaments'), { mode: 'list' });
@@ -20,4 +22,29 @@ test('els enllaços antics del torneig es converteixen al camí nou', () => {
   assert.equal(legacyTournamentPath('#view=abc123'), tournamentPaths.spectate('abc123'));
   assert.equal(legacyTournamentPath('#table=token_1'), tournamentPaths.table('token_1'));
   assert.equal(legacyTournamentPath('#t=antic'), null);
+});
+
+test('els codis de torneig en minúscules passen a majúscules', () => {
+  assert.equal(normalizedTournamentId(' bcdfg '), 'BCDFG');
+  assert.equal(normalizedTournamentId('BcDfGh'), 'BCDFGH');
+  assert.equal(normalizedTournamentId('abc123'), 'abc123');
+  assert.equal(normalizedTournamentId('bcdf'), 'bcdf');
+});
+
+test('les adreces amb el codi en minúscules es canvien pel camí canònic', () => {
+  assert.deepEqual(canonicalTournamentRoute(tournamentRoute('/tournaments/bcdfg')),
+    { mode: 'admin', value: 'BCDFG', path: '/tournaments/BCDFG' });
+  assert.equal(canonicalTournamentRoute(tournamentRoute('/tournaments/bcdfg/configure')).path, '/tournaments/BCDFG/configure');
+  assert.equal(canonicalTournamentRoute(tournamentRoute('/tournaments/bcdfg/results')).path, '/tournaments/BCDFG/results');
+  assert.equal(canonicalTournamentRoute(tournamentRoute('/tournaments/bcdfg/table')).path, '/tournaments/BCDFG/table');
+  assert.equal(canonicalTournamentRoute(tournamentRoute('/tournaments/spectate/bcdfg')).path, '/tournaments/spectate/BCDFG');
+  assert.equal(canonicalTournamentRoute(tournamentRoute('/tournaments/spectate/bcdfg/table')).path,
+    '/tournaments/spectate/BCDFG/table');
+  assert.equal(canonicalTournamentRoute(tournamentRoute('/tournaments/BCDFG')).path, null);
+  assert.equal(canonicalTournamentRoute(tournamentRoute('/tournaments')).path, null);
+});
+
+test('els tokens de taula conserven majúscules i minúscules', () => {
+  const route = canonicalTournamentRoute(tournamentRoute('/tournaments/table/bcdfgh'));
+  assert.deepEqual(route, { mode: 'table', value: 'bcdfgh', path: null });
 });

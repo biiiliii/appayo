@@ -13,6 +13,24 @@ export const tournamentPaths = {
   table: token => `/tournaments/table/${token}`,
 };
 
+/** Els codis de torneig són consonants majúscules; un codi escrit en minúscules es normalitza. */
+export const normalizedTournamentId = value => {
+  const id = String(value).trim();
+  return /^[BCDFGHJKLMNPRSTVWXYZ]{5,11}$/i.test(id) ? id.toUpperCase() : id;
+};
+
+const pathForMode = {
+  configure: tournamentPaths.configure, admin: tournamentPaths.admin, results: tournamentPaths.results,
+  results_table: tournamentPaths.resultsTable, view: tournamentPaths.spectate, public_table: tournamentPaths.spectateTable,
+};
+
+/** La ruta amb el codi en majúscules i el camí canònic. Els tokens de taula distingeixen majúscules i no es toquen. */
+export function canonicalTournamentRoute(route) {
+  if (!pathForMode[route.mode]) return { ...route, path: null };
+  const value = normalizedTournamentId(route.value);
+  return { ...route, value, path: value === route.value ? null : pathForMode[route.mode](value) };
+}
+
 export function tournamentRoute(pathname) {
   const path = pathname.replace(/\/$/, '') || '/';
   if (path === '/tournaments' || path === '/tournament.html') return { mode: 'list' };
