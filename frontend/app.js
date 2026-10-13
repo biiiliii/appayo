@@ -70,9 +70,7 @@ let serverSharedGame = null;
 let serverSharedError = null;
 let serverSharedLoading = false;
 const sharing = new Set();
-let pasting = false;
-let pasteError = null;
-let pasteText = '';
+let oldTournamentsExpanded = false;
 
 function load() {
   try {
@@ -903,6 +901,19 @@ async function deleteHistoryGame(g) {
   go('history');
 }
 
+async function deleteOldTournament(t) {
+  const confirmed = await confirmGameAction({
+    title: 'Esborrar el torneig antic?',
+    message: `«${tournamentTitle(t)}» s’esborrarà d’aquest dispositiu i no es podrà recuperar.`,
+    action: 'Esborra el torneig', danger: true,
+  });
+  if (!confirmed || !state.tournaments?.some(x => x.id === t.id)) return;
+  setState(st => {
+    st.tournaments = st.tournaments.filter(x => x.id !== t.id);
+    if (st.oldTid === t.id) st.oldTid = null;
+  });
+}
+
 function renderHistory() {
   const pages = Math.max(1, Math.ceil(state.games.length / HISTORY_PAGE_SIZE));
   const page = Math.min(Math.max(1, state.historyPage || 1), pages);
@@ -947,23 +958,30 @@ function renderHistory() {
         h('button', { class: 'btn outline small', type: 'button', disabled: page === pages,
           onclick: () => go('history', { historyPage: page + 1 }) }, 'Següent →'),
       ) : null,
-      state.games.length ? h('div', { class: 'actions end' }, h('button', {
-        class: 'btn quiet danger', type: 'button',
-        onclick: async () => {
-          const count = state.games.length;
-          const confirmed = await confirmGameAction({
-            title: 'Esborrar tot l’historial?',
-            message: `${count === 1 ? 'La partida desada s’esborrarà' : `Les ${count} partides desades s’esborraran`} d’aquest dispositiu i no es podran recuperar. Els enllaços compartits continuaran funcionant.`,
-            action: 'Esborra tot l’historial', danger: true,
-          });
-          if (!confirmed || !state.games.length) return;
-          history.replaceState(null, '', '/history');
-          setState(st => { st.games = []; st.viewing = null; st.historyPage = 1; });
-          toast('Historial esborrat');
-        },
-      }, 'Esborra tot l\'historial')) : null,
+      state.games.length ? h('div', { class: 'actions history-footer' },
+        pasteLink(),
+        h('button', {
+          class: 'btn quiet danger', type: 'button',
+          onclick: async () => {
+            const count = state.games.length;
+            const confirmed = await confirmGameAction({
+              title: 'Esborrar tot l’historial?',
+              message: `${count === 1 ? 'La partida desada s’esborrarà' : `Les ${count} partides desades s’esborraran`} d’aquest dispositiu i no es podran recuperar. Els enllaços compartits continuaran funcionant.`,
+              action: 'Esborra tot l’historial', danger: true,
+            });
+            if (!confirmed || !state.games.length) return;
+            history.replaceState(null, '', '/history');
+            setState(st => { st.games = []; st.viewing = null; st.historyPage = 1; });
+            toast('Historial esborrat');
+          },
+        }, 'Esborra tot l\'historial')) : null,
     ),
-    state.tournaments?.length ? section('Tornejos de la versió anterior', null,
+    state.games.length ? null : h('div', { class: 'paste-entry' }, pasteLink()),
+    state.tournaments?.length ? h('details', {
+      class: 'old-tournaments', open: oldTournamentsExpanded,
+      ontoggle: (event) => { oldTournamentsExpanded = event.currentTarget.open; },
+    },
+      h('summary', null, 'Tornejos de la versió anterior'),
       h('ul', { class: 'games' }, state.tournaments.map(t => {
         const p = progress(t);
         return h('li', { class: 'history-card' },
@@ -971,11 +989,13 @@ function renderHistory() {
             h('span', { class: 'history-players' },
               h('span', { class: 'history-player first' }, h('span', { class: 'history-name' }, tournamentTitle(t))),
               h('span', { class: 'history-player' }, `${t.players.length} jugadors · ${p.received} de ${p.total} taules rebudes`))),
-          h('span', { class: 'history-meta' }, h('span', { class: 'history-date' }, fmtShortDate(t.createdAt))));
+          h('span', { class: 'history-meta' }, h('span', { class: 'history-date' }, fmtShortDate(t.createdAt))),
+          h('span', { class: 'history-actions' },
+            h('button', { class: 'history-action danger', type: 'button',
+              'aria-label': `Esborra el torneig ${tournamentTitle(t)}`, title: 'Esborra el torneig',
+              onclick: () => deleteOldTournament(t) }, historyIcon('trash'))));
       })),
-      h('p', { class: 'note' }, 'Es poden consultar, però ja no s’hi poden afegir resultats.'),
     ) : null,
-    section('T\'han enviat una partida?', null, renderPaste()),
   );
 }
 
@@ -989,7 +1009,7 @@ function renderOldTournament() {
   const list = awards(rows);
   const champion = list.find(a => a.key === 'champion');
   return h('div', null,
-    masthead(null, undefined, undefined,
+    masthead(null, h('hr', { class: 'header-rule' }), undefined,
       h('button', { class: 'crumb', type: 'button', onclick: () => go('history') }, '← Torna a l’historial')),
     champion ? h('section', { class: 'winner' },
       h('p', { class: 'lead' }, done ? `${tournamentTitle(t)}: guanya` : `${tournamentTitle(t)}: anava davant`),
@@ -1036,47 +1056,45 @@ function renderOldInvite() {
   );
 }
 
-/** Per a qui rep l'enllaç i se li obre al navegador en lloc de l'app (als iPhone passa): copiar-lo i enganxar-lo aquí. */
-function renderPaste() {
-  if (!pasting) {
-    return h('div', null,
-      h('button', {
-        class: 'btn outline block', type: 'button',
-        onclick: () => { pasting = true; pasteError = null; render(); },
-      }, 'Enganxa l\'enllaç que t\'han enviat'),
-      h('p', { class: 'note' }, 'Copia el missatge o l\'enllaç del WhatsApp i enganxa\'l aquí per veure la partida i desar-la en aquesta app.'),
-    );
-  }
-  return h('div', null,
-    h('textarea', {
-      class: 'paste', id: 'paste-field', rows: 3, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
-      placeholder: 'Enganxa aquí el missatge o l\'enllaç',
-      'aria-label': 'Enllaç de la partida',
-      oninput: (e) => { pasteText = e.target.value; },
-    }, pasteText),
-    pasteError ? h('p', { class: 'error' }, SHARE_ERROR_TEXT[pasteError] ?? SHARE_ERROR_TEXT['bad-link']) : null,
-    h('div', { class: 'actions end' },
-      h('button', {
-        class: 'btn quiet', type: 'button',
-        onclick: () => { pasting = false; pasteError = null; pasteText = ''; render(); },
-      }, 'Deixa-ho estar'),
-      h('button', { class: 'btn', type: 'button', onclick: openPasted }, 'Obre l\'enllaç'),
-    ),
-  );
+/** Per a qui rep l'enllaç al navegador en lloc de l'app: enganxar-lo aquí per desar la partida. */
+function pasteLink() {
+  return h('button', { class: 'paste-link', type: 'button', onclick: openPasteDialog }, 'T\'han enviat una partida?');
 }
 
-function openPasted() {
-  const server = pasteText.match(/\/shared\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/i);
-  if (server) {
-    pasting = false; pasteError = null; pasteText = '';
-    go('serverShared', { serverSharedId: server[1] });
+function openPasteDialog() {
+  const field = h('textarea', {
+    class: 'paste', rows: 3, autofocus: true, autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+    placeholder: 'Enganxa aquí el missatge o l\'enllaç',
+    'aria-label': 'Enllaç de la partida',
+  });
+  const error = h('p', { class: 'error', role: 'alert', hidden: true });
+  const dialog = h('dialog', { class: 'game-dialog', 'aria-labelledby': 'paste-dialog-title' },
+    h('h2', { id: 'paste-dialog-title' }, 'T\'han enviat una partida?'),
+    field,
+    error,
+    h('div', { class: 'game-dialog-actions' },
+      h('button', { class: 'btn outline', type: 'button', onclick: () => dialog.close() }, 'Deixa-ho estar'),
+      h('button', { class: 'btn', type: 'button', onclick: () => openPasted(field.value, dialog, error) }, 'Obre l\'enllaç')),
+  );
+  showDialog(dialog, () => {
+    const pasted = window.prompt('Enganxa aquí el missatge o l\'enllaç:');
+    if (pasted !== null) openPasted(pasted, null, null);
+  });
+}
+
+function openPasted(text, dialog, error) {
+  const server = text.match(/\/shared\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})/i);
+  const read = server ? null : decodeShared(text);
+  if (read && !read.ok) {
+    if (error) {
+      error.textContent = SHARE_ERROR_TEXT[read.error] ?? SHARE_ERROR_TEXT['bad-link'];
+      error.hidden = false;
+    } else toast(SHARE_ERROR_TEXT[read.error] ?? SHARE_ERROR_TEXT['bad-link']);
     return;
   }
-  const read = decodeShared(pasteText);
-  if (!read.ok) { pasteError = read.error; render(); return; }
-  readLink(pasteText);
-  pasting = false; pasteError = null; pasteText = '';
-  go('shared');
+  dialog?.close();
+  if (server) go('serverShared', { serverSharedId: server[1] });
+  else { readLink(text); go('shared'); }
 }
 
 /** Una partida compartida de dalt a baix; a l'historial els detalls tenen pestanya pròpia. */

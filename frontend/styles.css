@@ -90,6 +90,7 @@ button { cursor: pointer; }
 .main-tabs a[aria-current="page"] { color: var(--green-deep); border-bottom-color: var(--green-deep); }
 .main-tabs a:focus-visible { outline-offset: -4px; }
 @media (max-width: 360px) { .main-tabs a { font-size: 14px; } }
+.header-rule { margin: 0; border: 0; border-bottom: 2px solid var(--rule-strong); }
 
 /* ---- Seccions: un títol en el tipus de display i una regla ---- */
 .section { padding: 22px 0 6px; }
@@ -339,6 +340,15 @@ button { cursor: pointer; }
 .crumb:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
 
 /* ---- Partida rebuda i enganxar-ne l'enllaç ---- */
+.history-footer { justify-content: space-between; }
+.paste-entry { padding: 22px 0 6px; border-top: 1px solid var(--rule); }
+.paste-link { border: 0; padding: 0; background: none; color: var(--green-deep); font-weight: 600; }
+.paste-link:hover { color: var(--green); }
+.game-dialog .error { margin-top: 10px; color: var(--danger); }
+.old-tournaments { padding: 22px 0 6px; border-top: 1px solid var(--rule); }
+.old-tournaments summary { width: fit-content; color: var(--muted); font-size: 15px; cursor: pointer; }
+.old-tournaments summary:hover { color: var(--ink-2); }
+.old-tournaments .games { margin-top: 12px; }
 .received {
   margin: 16px 0 -10px; text-align: center;
   font-size: 15px; font-weight: 700; color: var(--muted);
