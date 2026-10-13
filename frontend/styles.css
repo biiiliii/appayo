@@ -250,7 +250,7 @@ button { cursor: pointer; }
 .points::placeholder { color: var(--rule); font-weight: 600; font-size: 22px; letter-spacing: 0; }
 .points.is-auto { border-style: dashed; border-color: var(--green); background: var(--green-tint); color: var(--green-deep); }
 .points.is-auto.bad { border-color: var(--danger); background: var(--danger-tint); color: var(--danger); }
-.quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 6px; }
+.quick { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
 .quick button { min-height: 40px; border-radius: var(--r-s); border: 1.5px solid var(--rule); background: transparent; font-weight: 600; font-size: 15px; color: var(--ink-2); }
 .quick button:active { background: var(--green-tint); color: var(--green-deep); }
 .quick button:disabled { color: var(--rule); border-color: var(--rule); }

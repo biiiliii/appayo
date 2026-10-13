@@ -724,7 +724,7 @@ function renderRoundEntry(g, opts) {
   const setPoints = (i, value) => setState(st => {
     pick(st).points[i] = value === null ? null : clampPoints(value);
   });
-  // Els que no s'han tocat mostren el que els toca: la resta, o 0 si ja estan repartits els 250.
+  // Els que no s'han tocat mostren el que els toca quan es pot completar la ronda.
   const displayValue = (i) => (d.points[i] !== null ? d.points[i] : res.points[i]);
   const bump = (i, delta) => setPoints(i, clampPoints((displayValue(i) ?? 0) + delta));
 
@@ -757,7 +757,6 @@ function renderRoundEntry(g, opts) {
           type: 'text', inputmode: 'numeric', pattern: '[0-9]*', id: `points-${i}`,
           autocomplete: 'off', enterkeyhint: 'next',
           value: value === null ? '' : String(value),
-          placeholder: '0',
           'aria-label': `Punts de ${name}`,
           // En entrar al camp se selecciona tot: escriure substitueix el valor (també el calculat).
           onfocus: (e) => {
@@ -779,11 +778,12 @@ function renderRoundEntry(g, opts) {
         }),
         h('button', { class: 'step', type: 'button', 'aria-label': `Suma 1 a ${name}`, disabled: value !== null && value >= max, onclick: () => bump(i, 1) }, '+1'),
       ),
-      h('div', { class: 'quick' }, [-10, -5, 5, 10].map(delta => h('button', {
-        type: 'button', 'aria-label': `${delta > 0 ? 'Suma' : 'Resta'} ${Math.abs(delta)} a ${name}`,
-        disabled: value !== null && (delta < 0 ? value + delta < min : value + delta > max),
-        onclick: () => bump(i, delta),
-      }, `${delta > 0 ? '+' : '−'}${Math.abs(delta)}`))),
+      h('div', { class: 'quick' }, [-10, -5, 0, 5, 10].map(delta => h('button', {
+        type: 'button',
+        'aria-label': delta === 0 ? `Assigna 0 punts a ${name}` : `${delta > 0 ? 'Suma' : 'Resta'} ${Math.abs(delta)} a ${name}`,
+        disabled: delta !== 0 && value !== null && (delta < 0 ? value + delta < min : value + delta > max),
+        onclick: () => delta === 0 ? setPoints(i, 0) : bump(i, delta),
+      }, delta === 0 ? '0' : `${delta > 0 ? '+' : '−'}${Math.abs(delta)}`))),
     );
   });
 
