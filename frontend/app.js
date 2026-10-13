@@ -13,6 +13,7 @@ const STORAGE_KEY = 'appayo:v1';
 const SHARED_KEY = 'appayo:shared:v1';
 const HISTORY_PAGE_SIZE = 10;
 const root = document.getElementById('app');
+const placeholderNames = names => names.map((name, i) => name === `Jugador ${i + 1}` ? '' : name);
 
 const ERROR_TEXT = {
   'papayoo-missing': 'Cal dir qui s\'ha endut el Papayoo.',
@@ -43,10 +44,17 @@ const state = Object.assign({
   gameTab: 'overview',
   edit: null,     // ronda que s'està arreglant: { gameId (null = la partida en curs), round, draft, back }
 }, load() ?? {});
-let repairedSavedGame = false;
+let repairedSavedState = false;
+if (Array.isArray(state.setup?.names)) {
+  const names = placeholderNames(state.setup.names);
+  if (names.some((name, i) => name !== state.setup.names[i])) {
+    state.setup.names = names;
+    repairedSavedState = true;
+  }
+}
 if (state.game && !state.game.id) {
   state.game.id = `g-${state.game.createdAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  repairedSavedGame = true;
+  repairedSavedState = true;
 }
 for (const game of [state.game, ...(state.games ?? [])].filter(Boolean)) {
   for (const round of game.rounds ?? []) {
@@ -56,10 +64,10 @@ for (const game of [state.game, ...(state.games ?? [])].filter(Boolean)) {
     const candidates = round.points.flatMap((points, i) => points >= PAPAYOO_POINTS ? [i] : []);
     if (candidates.length !== 1) continue;
     round.papayoo = candidates[0];
-    repairedSavedGame = true;
+    repairedSavedState = true;
   }
 }
-if (repairedSavedGame) save();
+if (repairedSavedState) save();
 
 // Partida rebuda per un enllaç: només viu mentre es mira, no es desa fins que es diu.
 let incoming = null;
@@ -97,7 +105,7 @@ function archiveCurrentGame(st) {
   }
   // Les d'un torneig no canvien els noms de l'inici: són els de la taula que ha tocat.
   if (g && !g.tour) {
-    st.setup.names = g.players.slice();
+    st.setup.names = placeholderNames(g.players);
     if (st.setup.roundMode === 'players' && g.roundsPlanned === g.players.length) {
       st.setup.roundsPlanned = 'players';
     } else {

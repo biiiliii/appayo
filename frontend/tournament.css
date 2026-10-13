@@ -9,7 +9,9 @@
 .tour-spectate-name { margin: 22px 0 0; overflow-wrap: anywhere; font-size: clamp(24px, 3vw, 32px); line-height: 1.1; text-align: center; }
 .tour-spectate-back { margin-left: auto; color: var(--green-deep); font-weight: 700; text-decoration: none; white-space: nowrap; }
 .tour-spectate-back:hover { text-decoration: underline; }
-.tour-table-heading { margin: 20px 0 24px; text-align: center; }
+.tour-table-heading { margin: 20px 0 8px; text-align: center; }
+.tour-table-players { padding-top: 8px; }
+.tour-table-players p { margin: 0; }
 .tour-table-context { margin: 0; font-size: clamp(18px, 2.5vw, 23px); font-weight: 700; }
 .tour-table-rounds { margin: 8px 0 0; color: var(--ink-2); }
 .tour-table-return { margin-top: 16px; text-decoration: none; }
@@ -176,7 +178,6 @@
 .tour-card-divider { margin: 12px 0; border: 0; border-top: 1px solid var(--rule); }
 .tour-card-players { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .tour-card-players li { overflow-wrap: anywhere; }
-.tour-card-actions { display: flex; margin-top: 14px; }
 .tour-form .points-grid { display: grid; grid-template-columns: 1fr 100px; gap: 8px; align-items: center; }
 .tour-form .points-grid input { text-align: right; }
 .tour-form .points-grid input.is-auto { background: var(--green-tint); color: var(--ink-2); opacity: 1; }

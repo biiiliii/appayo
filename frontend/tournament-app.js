@@ -689,16 +689,6 @@ function configureTournament() {
       spectateCard(state.id)));
 }
 
-async function share(url, title) {
-  if (navigator.share) {
-    try { await navigator.share({ title, url }); return; } catch (err) {
-      if (err?.name === 'AbortError') return; // L’usuari ha tancat el menú de compartir.
-    }
-  }
-  try { await navigator.clipboard.writeText(url); toast('Enllaç copiat.'); }
-  catch { window.prompt('Copia l’enllaç de la taula:', url); }
-}
-
 let revealBusy = false;
 async function changeReveal(next) {
   if (revealBusy || !Number.isInteger(next) || next < 1 || next > 9) return;
@@ -829,24 +819,19 @@ function status(data, admin) {
     .filter(({ gi, current }) => visibleWaves.some(turn => turn.game === gi && turn.wave === current?.wave));
   const activeTables = visibleTables.filter(({ current }) => current.active);
   const waitingTables = visibleTables.filter(({ current }) => !current.active);
-  const tableCard = ({ seats, ti, gi, current }) => {
+  const tableCard = ({ seats, ti, current }) => {
     // Una taula acabada també obre la seva pàgina fins que comencen els resultats, per poder corregir rondes.
     const clickable = !admin && current.entryPath;
-    const link = admin ? data.links?.[gi]?.[ti] : null;
     return h(clickable ? 'a' : 'article', {
-    class: `tour-card${current.finished ? ' is-finished' : !current.active ? ' is-waiting' : ''}`,
-    ...(clickable ? { href: current.entryPath } : {}),
-  },
-  h('div', { class: 'tour-card-head' },
-    h('strong', {}, `Taula ${ti + 1}`),
-    h('span', { class: 'tour-card-status' }, current.finished ? '✓ Acabada'
-      : current.active ? `Ronda ${Math.min(current.rounds + 1, data.rounds)}/${data.rounds}` : 'En espera')),
-  h('hr', { class: 'tour-card-divider' }),
-  h('ul', { class: 'tour-card-players' }, seats.map(index => h('li', {}, data.players[index]))),
-  link ? h('div', { class: 'tour-card-actions' },
-    h('button', { class: 'btn outline small', type: 'button', 'aria-label': `Comparteix l’enllaç de la taula ${ti + 1}`,
-      onclick: () => share(`${location.origin}${tournamentPaths.table(link)}`,
-        `${data.name || 'Torneig de Papayoo'} · Partida ${gi + 1}, taula ${ti + 1}`) }, 'Comparteix l’enllaç')) : null);
+      class: `tour-card${current.finished ? ' is-finished' : !current.active ? ' is-waiting' : ''}`,
+      ...(clickable ? { href: current.entryPath } : {}),
+    },
+    h('div', { class: 'tour-card-head' },
+      h('strong', {}, `Taula ${ti + 1}`),
+      h('span', { class: 'tour-card-status' }, current.finished ? '✓ Acabada'
+        : current.active ? `Ronda ${Math.min(current.rounds + 1, data.rounds)}/${data.rounds}` : 'En espera')),
+    h('hr', { class: 'tour-card-divider' }),
+    h('ul', { class: 'tour-card-players' }, seats.map(index => h('li', {}, data.players[index]))));
   };
   const tableContent = h('div', { class: 'tour-playing-main' },
     visibleTables.length ? h('div', { class: 'tour-table-groups' },
@@ -1013,7 +998,8 @@ function table() {
       done || locked ? h('a', { class: 'btn outline tour-table-return', href: tournamentPaths.spectate(t.tournamentId) },
         'Tornar al llistat de taules') : null),
     notice(), locked ? h('p', { class: 'tour-ok', role: 'status' }, closedScoresMessage) : null,
-    section(null, h('p', {}, h('strong', {}, 'Jugadors: '), join(t.players))),
+    h('section', { class: 'section tour-table-players' },
+      h('p', {}, h('strong', {}, 'Jugadors: '), join(t.players))),
     waiting ? section('Encara no és el torn d’aquesta taula',
       h('p', {}, `${t.wave > 0 ? `Aquesta taula jugarà al torn ${t.wave + 1}, quan acabin les taules del torn anterior.`
         : t.game > 0 ? `Aquesta taula jugarà quan s’acabi la partida ${t.game}.` : 'Aquesta taula encara no pot començar.'
