@@ -3,8 +3,10 @@ import { TOTAL, PAPAYOO_POINTS, clampPoints, resolveRound } from './logic.js';
 import { brand, navigation } from './brand.js';
 import { tournamentPaths, tournamentRoute, legacyTournamentPath, normalizedTournamentId, canonicalTournamentRoute } from './routes.js';
 import { tournamentProgress, visibleTournamentWaves, suggestedTableCount } from './tournament-progress.js';
+import { canStoreLocally } from './storage.js';
 
 const root = document.getElementById('app');
+const localStorageAvailable = canStoreLocally();
 const sessionsKey = 'appayo:tournament-sessions';
 const draftKey = id => `appayo:tournament-config:${id}`;
 const localKey = token => `appayo:table:${token}`;
@@ -44,6 +46,8 @@ const organizerModes = ['admin', 'configure', 'results', 'results_table'];
 const publicModes = ['view', 'public_table'];
 const state = { data: null, mode: null, id: null, token: null, error: '', message: '', editing: null, draft: null,
   roundDrafts: {}, nameEditing: false, nameSaving: false, finishedTablesExpanded: false };
+const directSaves = new Set();
+const failedDirectSaves = new Set();
 
 function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -207,6 +211,7 @@ function requestOrganizerPassword(id) {
 }
 
 async function open(mode, value) {
+  if (mode === 'table') failedDirectSaves.delete(value);
   state.mode = mode;
   state.id = mode === 'table' ? null : value;
   state.token = mode === 'table' ? value : null;
@@ -219,10 +224,15 @@ async function open(mode, value) {
   state.nameEditing = false;
   state.nameSaving = false;
   render();
+  if (!localStorageAvailable && organizerModes.includes(mode)) return;
   await refresh();
 }
 
 async function refresh() {
+  // Després d'un error de xarxa es conserva el formulari fins al reintent: el primer PUT
+  // pot haver arribat al servidor, i un refresh podria confondre'l amb la ronda següent.
+  if (!localStorageAvailable && state.mode === 'table'
+      && (directSaves.has(state.token) || failedDirectSaves.has(state.token))) return;
   const routeKey = `${state.mode}:${state.id ?? state.token}`;
   const sameRoute = () => routeKey === `${state.mode}:${state.id ?? state.token}`;
   const previous = { data: state.data, error: state.error };
@@ -269,15 +279,22 @@ async function refresh() {
         state.draft = null;
         state.roundDrafts = {};
       }
+      const remoteRoundsChanged = !localStorageAvailable && state.data
+        && !sameRounds(remote.rounds, state.data.rounds);
+      if (remoteRoundsChanged) {
+        state.editing = null;
+        state.draft = null;
+        state.roundDrafts = {};
+      }
       const data = { ...remote, rounds: keepLocal ? local.rounds : remote.rounds };
       const changed = Boolean(state.error) || !state.data || JSON.stringify(data) !== JSON.stringify(state.data);
       state.data = data;
-      localStorage.setItem(localKey(state.token), JSON.stringify({
+      if (localStorageAvailable) localStorage.setItem(localKey(state.token), JSON.stringify({
         ...local, table: remote, rounds: data.rounds,
         dirty: pending, version: local?.version ?? 0,
         base: keepLocal ? (local.base ?? remote.version) : remote.version,
       }));
-      state.error = '';
+      state.error = remoteRoundsChanged ? conflictMessage : '';
       if (pending) await syncRounds();
       // Sense canvis no es torna a dibuixar: el camp que s'està corregint no perd el focus.
       if (!changed) return;
@@ -323,6 +340,7 @@ function updateTableNotice() {
 // Envia les rondes amb la versió del servidor en què es basen (`base`). Si un altre mòbil ha desat abans, mana el servidor.
 const syncTasks = new Map();
 function syncRounds() {
+  if (!localStorageAvailable) return Promise.resolve();
   const tableToken = state.token;
   if (!tableToken) return Promise.resolve();
   if (syncTasks.has(tableToken)) return syncTasks.get(tableToken);
@@ -646,9 +664,11 @@ function landing() {
   const followButton = h('button', { class: 'btn outline', type: 'submit' }, 'Segueix el torneig');
   return h('div', { class: 'tour-landing' }, header(), section(null,
     h('p', { class: 'lede' }, tournamentIntro),
-    h('div', { class: 'tour-landing-actions' },
+    !localStorageAvailable ? h('p', { class: 'lede' },
+      'Obre aquesta pàgina des del navegador del mòbil per crear o gestionar un torneig.') : null,
+    localStorageAvailable ? h('div', { class: 'tour-landing-actions' },
       h('a', { class: 'btn tour-create', href: tournamentPaths.new }, 'Crea un torneig'),
-      h('button', { class: 'btn outline', type: 'button', onclick: () => manageTournamentDialog() }, 'Gestiona un torneig existent'))),
+      h('button', { class: 'btn outline', type: 'button', onclick: () => manageTournamentDialog() }, 'Gestiona un torneig existent')) : null),
     section('Segueix un torneig',
       h('p', { class: 'lede' }, 'Entra el codi d’un torneig per seguir-ne l’estat.'),
       h('form', { class: 'tour-form', onsubmit: async event => {
@@ -977,6 +997,53 @@ function table() {
     const rounds = t.rounds.slice();
     const savedIndex = state.editing;
     if (savedIndex === null) rounds.push(row); else rounds[savedIndex] = row;
+    if (!localStorageAvailable) {
+      const tableToken = state.token;
+      if (directSaves.has(tableToken)) return;
+      directSaves.add(tableToken);
+      submit.disabled = true;
+      submit.textContent = 'Desant…';
+      try {
+        const result = await api(`/tables/${tableToken}/rounds`, { method: 'PUT',
+          body: JSON.stringify({ rounds, base: t.version }) });
+        failedDirectSaves.delete(tableToken);
+        if (state.mode !== 'table' || state.token !== tableToken) return;
+        t.rounds = rounds;
+        t.version = result.version;
+        delete state.roundDrafts[draftKey(savedIndex)];
+        const nextIndex = savedIndex === null ? rounds.length : savedIndex + 1;
+        state.editing = nextIndex >= t.roundsPlanned ? (savedIndex ?? rounds.length - 1)
+          : nextIndex === rounds.length ? null : nextIndex;
+        state.draft = state.roundDrafts[draftKey(state.editing)] ?? draftFor(state.editing);
+        state.message = ''; state.error = '';
+        render();
+        document.getElementById(`tour-round-tab-${state.editing ?? rounds.length}`)?.focus();
+        toast('Ronda desada');
+      } catch (err) {
+        if (state.mode !== 'table' || state.token !== tableToken) return;
+        if (err.status === 409 && err.body?.conflict && Array.isArray(err.body.rounds)) {
+          failedDirectSaves.delete(tableToken);
+          state.data = { ...t, rounds: err.body.rounds, version: err.body.version };
+          state.editing = null;
+          state.draft = null;
+          state.roundDrafts = {};
+          state.error = conflictMessage;
+          render();
+        } else if (err.status === 409 && err.message === closedScoresMessage) {
+          failedDirectSaves.delete(tableToken);
+          state.data = { ...t, revealed: true };
+          state.error = closedScoresMessage;
+          render();
+        } else {
+          failedDirectSaves.add(tableToken);
+          validation.textContent = 'No s’ha pogut confirmar que la ronda s’hagi desat. No tanquis aquesta pantalla; torna-ho a provar.';
+          validation.hidden = false;
+          submit.disabled = false;
+          submit.textContent = 'Torna a provar';
+        }
+      } finally { directSaves.delete(tableToken); }
+      return;
+    }
     t.rounds = rounds;
     const old = stored(localKey(state.token), null);
     localStorage.setItem(localKey(state.token), JSON.stringify({
@@ -1012,7 +1079,9 @@ function table() {
       done || locked || fromAdmin ? h('a', { class: 'btn outline tour-table-return',
         href: fromAdmin ? tournamentPaths.admin(t.tournamentId) : tournamentPaths.spectate(t.tournamentId) },
         'Tornar al llistat de taules') : null),
-    notice(), locked ? h('p', { class: 'tour-ok', role: 'status' }, closedScoresMessage) : null,
+    notice(), !localStorageAvailable && !locked ? h('p', { class: 'note' },
+      'Aquest navegador no pot desar rondes al dispositiu. Cal connexió per desar-les al torneig.') : null,
+    locked ? h('p', { class: 'tour-ok', role: 'status' }, closedScoresMessage) : null,
     h('section', { class: 'section tour-table-players' },
       h('p', {}, h('strong', {}, 'Jugadors: '), join(t.players))),
     waiting ? section('Encara no és el torn d’aquesta taula',
@@ -1039,7 +1108,10 @@ function render() {
   document.title = `${titles[state.mode] ?? 'Tornejos'} | APPayoo`;
   root.classList.toggle('tour-desktop', organizerModes.includes(state.mode));
   let content;
-  if (state.mode === 'list') content = landing();
+  if (!localStorageAvailable && (state.mode === 'new' || organizerModes.includes(state.mode)))
+    content = h('div', {}, header(tournamentPaths.list), section('Obre APPayoo al navegador',
+      h('p', { class: 'lede' }, 'Obre aquesta pàgina des del navegador del mòbil per crear o gestionar un torneig.')));
+  else if (state.mode === 'list') content = landing();
   else if (state.mode === 'new') content = newTournament();
   else if (state.mode === 'configure' && state.data) content = configureTournament();
   else if (state.mode === 'missing') content = h('div', {}, header(), section('Pàgina no trobada', h('a', { href: tournamentPaths.list }, 'Torna als tornejos')));

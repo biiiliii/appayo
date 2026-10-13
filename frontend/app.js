@@ -5,6 +5,7 @@ import {
 import { renderChart, seriesColor } from './chart.js';
 import { symbolEl } from './symbols.js';
 import { brand, navigation } from './brand.js';
+import { canStoreLocally } from './storage.js';
 import { decodeShared, normalizeSharedGame, shareLink, legacyShareLink, shareMessage, gameKey } from './share.js';
 import {
   tournamentStandings, awards, fmtAward, standingsMessage, fmtPoints, joinNames, tournamentTitle, needsScaling, progress,
@@ -13,6 +14,7 @@ const STORAGE_KEY = 'appayo:v1';
 const SHARED_KEY = 'appayo:shared:v1';
 const HISTORY_PAGE_SIZE = 10;
 const root = document.getElementById('app');
+const localStorageAvailable = canStoreLocally();
 const placeholderNames = names => names.map((name, i) => name === `Jugador ${i + 1}` ? '' : name);
 
 const ERROR_TEXT = {
@@ -408,7 +410,9 @@ function render() {
     setup: renderSetup, game: renderGame, history: renderHistory, detail: renderDetail, shared: renderShared,
     serverShared: renderServerShared, edit: renderEdit, oldInvite: renderOldInvite, oldTournament: renderOldTournament,
   };
-  const fn = (state.screen === 'game' && !state.game) ? renderSetup : (screens[state.screen] || renderSetup);
+  const fn = !localStorageAvailable && !['shared', 'serverShared'].includes(state.screen)
+    ? renderStorageUnavailable
+    : (state.screen === 'game' && !state.game) ? renderSetup : (screens[state.screen] || renderSetup);
   const titles = {
     setup: "APPayoo - L'app per contar els punts de Papayoo!",
     game: 'Partida | APPayoo',
@@ -420,7 +424,8 @@ function render() {
     oldInvite: 'Torneig antic | APPayoo',
     oldTournament: 'Torneig antic | APPayoo',
   };
-  document.title = fn === renderSetup ? titles.setup : titles[state.screen];
+  document.title = fn === renderStorageUnavailable ? 'Obre APPayoo al navegador'
+    : fn === renderSetup ? titles.setup : titles[state.screen];
   root.replaceChildren(fn());
   if (focusId) {
     const el = document.getElementById(focusId);
@@ -432,6 +437,10 @@ function render() {
       }
     }
   }
+}
+function renderStorageUnavailable() {
+  return h('div', null, masthead(), section('Obre APPayoo al navegador', null,
+    h('p', { class: 'lede' }, 'Obre aquesta pàgina des del navegador del mòbil per crear partides o consultar l’historial de partides d’aquest dispositiu.')));
 }
 function go(screen, extra) {
   const viewing = extra?.viewing ?? state.viewing;
@@ -1239,6 +1248,7 @@ function renderShared() {
 
 /** Desar una partida rebuda, o posar-ne al dia la còpia si qui l'envia hi ha arreglat o afegit rondes. */
 function receivedActions(g) {
+  if (!localStorageAvailable) return null;
   const copy = state.games.find(x => gameKey(x) === gameKey(g));
   if (!copy) return h('button', { class: 'btn', type: 'button', onclick: () => saveIncoming(g) }, 'Desa-la a les meves partides');
   if (JSON.stringify(copy.rounds) === JSON.stringify(g.rounds)) return h('p', { class: 'note' }, 'Aquesta partida ja la tens desada.');
