@@ -6,6 +6,9 @@ import { renderChart, seriesColor } from './chart.js';
 import { symbolEl } from './symbols.js';
 import { brand, navigation } from './brand.js';
 import { decodeShared, normalizeSharedGame, shareLink, legacyShareLink, shareMessage, gameKey } from './share.js';
+import {
+  tournamentStandings, awards, fmtAward, standingsMessage, fmtPoints, joinNames, tournamentTitle, needsScaling, progress,
+} from './legacy-tournament.js';
 const STORAGE_KEY = 'appayo:v1';
 const SHARED_KEY = 'appayo:shared:v1';
 const HISTORY_PAGE_SIZE = 10;
@@ -350,6 +353,7 @@ function readHash() {
   return readLink(location.hash);
 }
 function readLink(text) {
+  if (/[#&?]t=/.test(text)) return 'oldInvite';
   if (/[#&?]p=/.test(text)) {
     const read = decodeShared(text);
     incoming = read.ok ? read.game : null;
@@ -396,7 +400,7 @@ function render() {
   const focusId = active && active.id ? active.id : null;
   const screens = {
     setup: renderSetup, game: renderGame, history: renderHistory, detail: renderDetail, shared: renderShared,
-    serverShared: renderServerShared, edit: renderEdit,
+    serverShared: renderServerShared, edit: renderEdit, oldInvite: renderOldInvite, oldTournament: renderOldTournament,
   };
   const fn = (state.screen === 'game' && !state.game) ? renderSetup : (screens[state.screen] || renderSetup);
   const titles = {
@@ -407,6 +411,8 @@ function render() {
     shared: 'Partida compartida | APPayoo',
     serverShared: 'Partida compartida | APPayoo',
     edit: 'Correcció de ronda | APPayoo',
+    oldInvite: 'Torneig antic | APPayoo',
+    oldTournament: 'Torneig antic | APPayoo',
   };
   document.title = fn === renderSetup ? titles.setup : titles[state.screen];
   root.replaceChildren(fn());
@@ -436,6 +442,7 @@ function go(screen, extra) {
   else if (screen === 'edit') path = `/game/${encodeURIComponent(editing?.gameId || state.game?.id)}/edit`;
   else if (screen === 'detail' && viewing) path = gamePath(viewing, tab);
   else if (screen === 'history') path = `/history${historyPage > 1 ? `?page=${historyPage}` : ''}`;
+  else if (screen === 'oldTournament') path = '/history';
   if (`${location.pathname}${location.search}${location.hash}` !== path) history.pushState(null, '', path);
   if (screen === 'serverShared') serverSharedTab = extra?.serverSharedTab ?? 'overview';
   setState(st => {
@@ -956,7 +963,76 @@ function renderHistory() {
         },
       }, 'Esborra tot l\'historial')) : null,
     ),
+    state.tournaments?.length ? section('Tornejos de la versió anterior', null,
+      h('ul', { class: 'games' }, state.tournaments.map(t => {
+        const p = progress(t);
+        return h('li', { class: 'history-card' },
+          h('button', { class: 'history-open', type: 'button', onclick: () => go('oldTournament', { oldTid: t.id }) },
+            h('span', { class: 'history-players' },
+              h('span', { class: 'history-player first' }, h('span', { class: 'history-name' }, tournamentTitle(t))),
+              h('span', { class: 'history-player' }, `${t.players.length} jugadors · ${p.received} de ${p.total} taules rebudes`))),
+          h('span', { class: 'history-meta' }, h('span', { class: 'history-date' }, fmtShortDate(t.createdAt))));
+      })),
+      h('p', { class: 'note' }, 'Es poden consultar, però ja no s’hi poden afegir resultats.'),
+    ) : null,
     section('T\'han enviat una partida?', null, renderPaste()),
+  );
+}
+
+// ---------- Tornejos de la versió anterior (sense servidor): només per consultar ----------
+function renderOldTournament() {
+  const t = state.tournaments?.find(x => x.id === state.oldTid);
+  if (!t) return renderHistory();
+  const rows = tournamentStandings(t);
+  const p = progress(t);
+  const done = p.received === p.total;
+  const list = awards(rows);
+  const champion = list.find(a => a.key === 'champion');
+  return h('div', null,
+    masthead(null, undefined, undefined,
+      h('button', { class: 'crumb', type: 'button', onclick: () => go('history') }, '← Torna a l’historial')),
+    champion ? h('section', { class: 'winner' },
+      h('p', { class: 'lead' }, done ? `${tournamentTitle(t)}: guanya` : `${tournamentTitle(t)}: anava davant`),
+      h('p', { class: 'name' }, joinNames(champion.names)),
+      h('p', { class: 'sub' }, `${fmtPoints(champion.value)} punts. ${done ? 'Van arribar tots els resultats.' : `Van arribar ${p.received} de ${p.total} resultats.`}`),
+    ) : section(tournamentTitle(t), null, h('p', { class: 'note' }, 'No hi va arribar cap resultat.')),
+    p.received ? section('Classificació', 'menys punts guanya',
+      h('div', { class: 'scroll-x' }, h('table', { class: 'rounds tstand' },
+        h('thead', null, h('tr', null,
+          h('th', null, ''),
+          h('th', { class: 'name' }, 'Jugador'),
+          Array.from({ length: t.games }, (_, g) => h('th', { title: `Partida ${g + 1}` }, `P${g + 1}`)),
+          h('th', null, 'Total'),
+        )),
+        h('tbody', null, rows.map(r => h('tr', { class: r.rank === 1 ? 'first' : null },
+          h('td', null, r.rank ? `${r.rank}.` : ''),
+          h('td', { class: 'name' }, r.name),
+          r.games.map(x => h('td', null, x ? fmtPoints(x.points) : '–')),
+          h('td', { class: 'total' }, r.played ? fmtPoints(r.total) : '–'),
+        ))),
+      )),
+      needsScaling(t) ? h('p', { class: 'note' }, 'Hi havia taules de mides diferents: els punts de cada taula es van passar al que serien en una taula de 5.') : null,
+    ) : null,
+    list.length ? section('Diplomes', null,
+      h('ul', { class: 'diplomas' }, list.map(a => h('li', null,
+        h('div', { class: 'dtitle' }, h('b', null, a.title), h('small', null, a.detail)),
+        h('div', { class: 'dwho' }, h('span', null, joinNames(a.names)), h('small', null, fmtAward(a))),
+      ))),
+    ) : null,
+    p.received ? h('div', { class: 'actions center' },
+      h('button', { class: 'btn', type: 'button', onclick: () => shareText(standingsMessage(t, rows)) }, 'Comparteix la classificació')) : null,
+  );
+}
+
+/** Enllaç d'invitació (#t=) del mode torneig anterior: ja no es pot jugar així. */
+function renderOldInvite() {
+  const leave = () => { clearHash(); go(state.game ? 'game' : 'setup'); };
+  return h('div', null,
+    masthead(),
+    section('Enllaç d’un torneig antic', null,
+      h('p', { class: 'lede' }, 'Aquest enllaç és d’una taula d’un torneig fet amb la versió anterior de l’app. Ara els tornejos funcionen d’una altra manera: demana a qui l’organitza l’enllaç nou de la teva taula.'),
+      h('button', { class: 'btn block', type: 'button', onclick: leave }, state.game ? 'Torna a la partida' : 'Ves a l’inici'),
+    ),
   );
 }
 
@@ -1127,7 +1203,9 @@ function renderShared() {
   if (!g) return renderSetup();
   return h('div', null,
     masthead(back),
-    h('p', { class: 'received' }, 'T\'han enviat aquesta partida'),
+    h('p', { class: 'received' }, g.tour
+      ? `Resultat de la taula ${g.tour.table + 1} (partida ${g.tour.game + 1}) d’un torneig de la versió anterior`
+      : 'T\'han enviat aquesta partida'),
     gameReport(g, `${fmtDate(g.endedAt)}, ${fmtRounds(g.rounds.length)}`),
     h('div', { class: 'actions center' }, receivedActions(g)),
   );
