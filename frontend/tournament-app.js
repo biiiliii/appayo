@@ -43,7 +43,7 @@ function changeSession(id, change) {
 const organizerModes = ['admin', 'configure', 'results', 'results_table'];
 const publicModes = ['view', 'public_table'];
 const state = { data: null, mode: null, id: null, token: null, error: '', message: '', editing: null, draft: null,
-  roundDrafts: {}, nameEditing: false, nameSaving: false };
+  roundDrafts: {}, nameEditing: false, nameSaving: false, finishedTablesExpanded: false };
 
 function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -814,52 +814,66 @@ function status(data, admin) {
   const hasMultipleWaves = progress.hasMultipleWaves;
   const progressLabel = `Partida ${progress.game}/${data.games}${hasMultipleWaves ? ` — Torn ${progress.wave}/${progress.waves}` : ''} — Ronda ${progress.round}/${data.rounds}`;
   const progressFill = h('span', { class: 'tour-stage-fill', style: `width: ${100 * progress.completed / progress.total}%` });
-  const visibleTables = data.schedule.flatMap((game, gi) => game.map((seats, ti) => ({ seats, ti, gi,
-    current: data.tables.find(table => table.game === gi && table.table === ti) })))
-    .filter(({ gi, current }) => visibleWaves.some(turn => turn.game === gi && turn.wave === current?.wave));
+  const allTables = data.schedule.flatMap((game, gi) => game.map((seats, ti) => ({ seats, ti, gi,
+    current: data.tables.find(table => table.game === gi && table.table === ti) })));
+  const visibleTables = allTables.filter(({ gi, current }) =>
+    visibleWaves.some(turn => turn.game === gi && turn.wave === current?.wave));
+  const hiddenFinishedTables = admin ? allTables.filter(table => table.current.finished && !visibleTables.includes(table)) : [];
   const activeTables = visibleTables.filter(({ current }) => current.active);
   const waitingTables = visibleTables.filter(({ current }) => !current.active);
-  const tableCard = ({ seats, ti, current }) => {
-    // Una taula acabada també obre la seva pàgina fins que comencen els resultats, per poder corregir rondes.
-    const clickable = !admin && current.entryPath;
-    return h(clickable ? 'a' : 'article', {
+  const tableCard = ({ seats, ti, gi, current }, showGame = false) => {
+    // A la vista pública, una taula acabada es veu però no es pot obrir des del llistat.
+    const token = admin ? data.links?.[gi]?.[ti] : null;
+    const path = admin
+      ? (current.active || current.finished) && token && `${tournamentPaths.table(token)}?from=admin`
+      : current.active && !current.finished && current.entryPath;
+    return h(path ? 'a' : 'article', {
       class: `tour-card${current.finished ? ' is-finished' : !current.active ? ' is-waiting' : ''}`,
-      ...(clickable ? { href: current.entryPath } : {}),
+      ...(path ? { href: path } : {}),
     },
     h('div', { class: 'tour-card-head' },
-      h('strong', {}, `Taula ${ti + 1}`),
-      h('span', { class: 'tour-card-status' }, current.finished ? '✓ Acabada'
+      h('strong', {}, `${showGame ? `Partida ${gi + 1} · ` : ''}Taula ${ti + 1}`),
+      showGame ? null : h('span', { class: 'tour-card-status' }, current.finished ? '✓ Acabada'
         : current.active ? `Ronda ${Math.min(current.rounds + 1, data.rounds)}/${data.rounds}` : 'En espera')),
     h('hr', { class: 'tour-card-divider' }),
     h('ul', { class: 'tour-card-players' }, seats.map(index => h('li', {}, data.players[index]))));
   };
   const tableContent = h('div', { class: 'tour-playing-main' },
     visibleTables.length ? h('div', { class: 'tour-table-groups' },
-      activeTables.length ? h('div', { class: 'tour-cards' }, activeTables.map(tableCard)) : null,
+      activeTables.length ? h('div', { class: 'tour-cards' }, activeTables.map(table => tableCard(table))) : null,
       waitingTables.length ? h('section', { class: 'tour-upcoming' },
         h('h3', { class: 'tour-upcoming-title' }, 'A continuació:'),
-        h('div', { class: 'tour-cards' }, waitingTables.map(tableCard))) : null) : null,
+        h('div', { class: 'tour-cards' }, waitingTables.map(table => tableCard(table)))) : null) : null,
     admin && allFinished ? h('div', { class: 'actions tour-results-actions' },
       h('button', { class: 'btn', type: 'button', onclick: () => confirmDialog({
         title: 'Comencen els resultats?', text: 'A partir d’ara cap taula podrà corregir rondes.',
         confirm: 'Mostra els resultats', onConfirm: () => changeReveal(1),
       }) }, 'Mostra els resultats')) : null);
+  const finishedTables = hiddenFinishedTables.length ? h('details', {
+    class: 'tour-finished-tables',
+    ...(state.finishedTablesExpanded ? { open: '' } : {}),
+    ontoggle: event => { state.finishedTablesExpanded = event.currentTarget.open; },
+  },
+    h('summary', {}, 'Partides acabades'),
+    h('div', { class: 'tour-cards' }, hiddenFinishedTables.map(table => tableCard(table, true)))) : null;
   return h('div', {}, admin ? tournamentHeader(data) : spectateHeader(data),
     h('section', { class: 'tour-stage-progress' },
       h('h2', { class: 'tour-stage-title' }, progressLabel),
       h('div', { class: `tour-stage-meter${data.phase === 'playing' ? ' is-playing' : ''}`, role: 'progressbar', 'aria-label': 'Progrés del torneig',
         'aria-valuemin': '0', 'aria-valuemax': String(progress.total), 'aria-valuenow': String(progress.completed) }, progressFill)),
-    !admin && visibleTables.some(({ current }) => current.entryPath)
+    !admin && visibleTables.some(({ current }) => current.active && !current.finished && current.entryPath)
       ? h('p', { class: 'tour-spectate-instruction' }, 'Toca la teva taula per apuntar-ne els punts') : null,
     notice(),
     admin && !allFinished ? h('div', { class: 'tour-config-layout tour-playing-layout' }, tableContent,
-      spectateCard(data.id, 'Entra la puntuació')) : tableContent);
+      spectateCard(data.id, 'Entra la puntuació')) : tableContent,
+    finishedTables);
 }
 
 function emptyDraft(size) { return { papayoo: null, points: Array(size).fill(null) }; }
 
 function table() {
   const t = state.data;
+  const fromAdmin = new URLSearchParams(location.search).get('from') === 'admin';
   const locked = Boolean(t.revealed);
   const count = t.rounds.length;
   const done = count >= t.roundsPlanned;
@@ -995,7 +1009,8 @@ function table() {
     h('div', { class: 'tour-table-heading' },
       h('p', { class: 'tour-table-context' }, `Partida ${t.game + 1}${t.waves > 1 ? ` — Torn ${t.wave + 1}` : ''} — Taula ${t.table + 1}`),
       h('p', { class: 'tour-table-rounds' }, `${count} de ${t.roundsPlanned} rondes desades.`),
-      done || locked ? h('a', { class: 'btn outline tour-table-return', href: tournamentPaths.spectate(t.tournamentId) },
+      done || locked || fromAdmin ? h('a', { class: 'btn outline tour-table-return',
+        href: fromAdmin ? tournamentPaths.admin(t.tournamentId) : tournamentPaths.spectate(t.tournamentId) },
         'Tornar al llistat de taules') : null),
     notice(), locked ? h('p', { class: 'tour-ok', role: 'status' }, closedScoresMessage) : null,
     h('section', { class: 'section tour-table-players' },

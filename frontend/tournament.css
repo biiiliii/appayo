@@ -178,6 +178,10 @@
 .tour-card-divider { margin: 12px 0; border: 0; border-top: 1px solid var(--rule); }
 .tour-card-players { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .tour-card-players li { overflow-wrap: anywhere; }
+.tour-finished-tables { margin-top: 18px; }
+.tour-finished-tables summary { width: fit-content; color: var(--muted); font-size: 15px; cursor: pointer; }
+.tour-finished-tables summary:hover { color: var(--ink-2); }
+.tour-finished-tables .tour-cards { margin-top: 16px; }
 .tour-form .points-grid { display: grid; grid-template-columns: 1fr 100px; gap: 8px; align-items: center; }
 .tour-form .points-grid input { text-align: right; }
 .tour-form .points-grid input.is-auto { background: var(--green-tint); color: var(--ink-2); opacity: 1; }
