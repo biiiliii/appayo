@@ -88,6 +88,7 @@
 .tour-recent-empty { margin: 18px 0 0 !important; }
 .tour-other-link { margin-top: 14px; padding: 8px 2px; border: 0; background: transparent; color: var(--green-deep); font-weight: 700; text-decoration: underline; }
 .tour-form label { display: grid; gap: 5px; font-weight: 700; }
+.tour-field-hint { margin: -6px 0 0; color: var(--ink-2); font-size: 14.5px; }
 .tour-form input, .tour-form textarea, .tour-form select { width: 100%; box-sizing: border-box; font: inherit; padding: 10px; border: 1px solid #a9a49a; border-radius: 8px; background: white; color: #25231f; }
 .tour-form textarea { min-height: 180px; }
 .tour-form .short { max-width: 180px; }
@@ -133,7 +134,7 @@
 .tour-award-label { display: flex; flex-direction: column; align-items: center; width: min(100%, 680px); box-sizing: border-box; margin-top: 42px; padding: clamp(22px, 4vw, 38px); border: 1px solid var(--rule); border-radius: 12px; background: var(--sheet); box-shadow: 0 12px 32px #15261d12; opacity: 0; transform: translateY(14px) rotate(-1deg); transition: opacity .55s ease, transform .55s ease; }
 .tour-reveal-slide.show-statistic .tour-award-label { opacity: 1; transform: rotate(-1deg); }
 .tour-reveal-statistic { order: 2; margin: 0; padding-top: 22px; border-top: 1px solid var(--rule); color: var(--green-deep); font-size: clamp(21px, 2.7vw, 32px); font-weight: 800; }
-.tour-reveal-names { order: 1; display: flex; align-items: center; justify-content: center; max-width: 24ch; min-height: 1.8em; margin: 0 0 20px; overflow-wrap: anywhere; font-family: "Segoe Print", "Comic Sans MS", cursive; font-size: clamp(32px, 4.8vw, 58px); font-weight: 700; line-height: 1.1; }
+.tour-reveal-names { order: 1; display: flex; align-items: center; justify-content: center; max-width: 24ch; min-height: 1.8em; margin: 0 0 20px; overflow-wrap: anywhere; font-size: clamp(32px, 4.8vw, 58px); font-weight: 800; font-stretch: 90%; font-variation-settings: "opsz" 96; letter-spacing: -.02em; line-height: 1.1; }
 .tour-reveal-slide.show-description .tour-reveal-description, .tour-reveal-slide.show-statistic .tour-reveal-statistic, .tour-reveal-slide.show-names .tour-reveal-names { opacity: 1; transform: none; }
 @keyframes tour-reveal-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .tour-reveal-nav { position: fixed; z-index: 5; right: clamp(18px, 4vw, 60px); bottom: max(20px, env(safe-area-inset-bottom)); left: clamp(18px, 4vw, 60px); display: flex; justify-content: space-between; gap: 12px; pointer-events: none; }
@@ -143,9 +144,10 @@
 .tour-final-hint { margin: -8px 0 18px; color: var(--ink-2); text-align: center; }
 .tour-final-content .tour-results table { width: 100%; }
 .tour-final-content .tour-results th, .tour-final-content .tour-results td { padding: 12px 14px; }
-.tour-award-icon { display: inline-block; white-space: nowrap; }
-.tour-award-silver { filter: grayscale(1) brightness(1.25); }
-.tour-award-bronze { filter: sepia(1) saturate(2.5) hue-rotate(335deg) brightness(.8); }
+.tour-marked { display: inline-flex; align-items: baseline; gap: 6px; }
+.tour-badge { display: inline-block; padding: 1px 6px; border: 1px solid currentColor; border-radius: 4px; color: var(--green-deep); font-size: 12.5px; font-weight: 800; line-height: 1.35; letter-spacing: .01em; }
+.tour-badge.is-first { border-color: var(--green-deep); background: var(--green-deep); color: #fff; }
+.tour-badge.is-max { color: var(--ink-2); }
 .tour-results-rank { display: inline-block; min-width: 2.5ch; margin-right: 8px; font-weight: 800; }
 .tour-results-clickable { cursor: pointer; }
 .tour-results-clickable:hover { background: var(--green-tint); }
@@ -165,13 +167,14 @@
 .tour-card[href] { display: block; color: inherit; text-decoration: none; transition: border-color .15s, box-shadow .15s; }
 .tour-card[href]:hover { border-color: var(--green); box-shadow: 0 3px 12px #15261d18; }
 .tour-card.is-finished { border-color: #b8d0bd; background: var(--green-tint); }
-.tour-card.is-waiting { opacity: .55; }
+.tour-card.is-waiting { border-style: dashed; border-color: var(--muted); background: transparent; color: var(--ink-2); }
 .tour-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.tour-card-status { color: var(--muted); font-size: 14px; white-space: nowrap; }
+.tour-card-status { color: var(--ink-2); font-size: 14px; white-space: nowrap; }
 .tour-card.is-finished .tour-card-status { padding: 3px 9px; border-radius: 999px; background: var(--green-deep); color: white; font-weight: 700; }
 .tour-card-divider { margin: 12px 0; border: 0; border-top: 1px solid var(--rule); }
 .tour-card-players { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .tour-card-players li { overflow-wrap: anywhere; }
+.tour-card-actions { display: flex; margin-top: 14px; }
 .tour-form .points-grid { display: grid; grid-template-columns: 1fr 100px; gap: 8px; align-items: center; }
 .tour-form .points-grid input { text-align: right; }
 .tour-form .points-grid input.is-auto { background: var(--green-tint); color: var(--ink-2); opacity: 1; }
