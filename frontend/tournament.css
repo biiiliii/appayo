@@ -142,6 +142,8 @@
 .tour-final-content { margin: 34px auto 0; }
 .tour-final-content h1 { margin: 0 0 24px; text-align: center; font-size: clamp(30px, 4vw, 48px); }
 .tour-final-hint { margin: -8px 0 18px; color: var(--ink-2); text-align: center; }
+/* Al mòbil, la taula de l'organitzador (amb Papayoos, rondes a zero i màxim) es desplaça sense eixamplar la pàgina. */
+.tour-final-content .tour-results { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .tour-final-content .tour-results table { width: 100%; }
 .tour-final-content .tour-results th, .tour-final-content .tour-results td { padding: 12px 14px; }
 .tour-marked { display: inline-flex; align-items: baseline; gap: 6px; }

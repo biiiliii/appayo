@@ -802,7 +802,7 @@ function resultsTable(data, admin) {
   }));
   return h('div', { class: 'tour-final-page' }, admin ? tournamentHeader(data, false) : spectateHeader(data),
     notice(), h('section', { class: 'tour-final-content' }, h('h1', {}, 'Classificació final'),
-      admin ? null : h('p', { class: 'tour-final-hint' }, 'Clica un jugador per veure’n més detalls.'),
+      admin ? null : h('p', { class: 'tour-final-hint' }, 'Toca un jugador per veure’n més detalls.'),
       h('div', { class: 'tour-results' }, h('table', {}, header, body))),
     admin ? revealNavigation(9) : null);
 }
