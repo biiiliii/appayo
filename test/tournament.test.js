@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {
   tableSizes, makeSchedule, countRepeats, seededRandom, parseNames, validateTournament,
   createTournament, encodeInvite, decodeInvite, inviteLink, inviteMessage, resultMessage,
-  tableResult, acceptResult, tournamentStandings, needsScaling, referenceTableSize, tableWave, activeWave,
-  awards, presentationAwards, standingsMessage, fmtPoints, progress,
+  tableResult, acceptResult, tournamentStandings, needsScaling, referenceTableSize, tableWave, gameWaves, activeWave,
+  awards, presentationAwards, standingsMessage, fmtPoints, progress, repeatedNames,
 } from '../backend/tournament.js';
 import { encodeGame, decodeShared } from '../frontend/share.js';
 
@@ -37,6 +37,18 @@ test('tables stay between 4 and 6 and differ by one at most', () => {
 test('few players play at a single table', () => {
   assert.deepEqual(tableSizes(3), [3]);
   assert.deepEqual(tableSizes(7), [7]);
+});
+
+test('cap taula té menys de tres jugadors ni més de vuit, sigui quina sigui la mida ideal', () => {
+  for (let n = 3; n <= 120; n++) {
+    for (let ideal = 3; ideal <= 8; ideal++) {
+      const sizes = tableSizes(n, ideal);
+      assert.equal(sum(sizes), n, `n=${n}, ideal=${ideal}`);
+      assert.ok(Math.min(...sizes) >= 3 && Math.max(...sizes) <= 8, `n=${n}, ideal=${ideal}: ${sizes}`);
+    }
+  }
+  assert.deepEqual(tableSizes(5, 3), [5]);
+  assert.deepEqual(tableSizes(7, 3), [4, 3]);
 });
 
 // ---------- Sorteig ----------
@@ -91,6 +103,9 @@ test('el límit de taules reparteix cada partida en torns successius', () => {
   const t = createTournament({ name: 'Torns', players: names(10), games: 2, rounds: 1,
     schedule: makeSchedule(10, 2, seededRandom(1)), simultaneousTables: 1 });
   assert.equal(tableWave(t, 1), 1);
+  assert.equal(gameWaves(t, 0), 2);
+  // Els tornejos sense límit desat juguen totes les taules alhora.
+  assert.equal(gameWaves({ ...t, simultaneousTables: undefined }, 0), 1);
   const finished = new Set();
   assert.deepEqual(activeWave(t, finished), { game: 0, wave: 0 });
   finished.add('0-0');
@@ -114,13 +129,19 @@ test('names are read one per line, trimmed, blank lines skipped, list markers re
   assert.deepEqual(parseNames(' Núria \n\n2. Mercè\n- Joan\n3) Pep\n• Anna\n'), ['Núria', 'Mercè', 'Joan', 'Pep', 'Anna']);
 });
 
-test('a tournament needs at least two players and unique names', () => {
+test('a tournament needs at least three players and unique names', () => {
   assert.deepEqual(validateTournament(['A']), ['too-few']);
-  assert.deepEqual(validateTournament(['A', 'B']), []);
+  assert.deepEqual(validateTournament(['A', 'B']), ['too-few']);
+  assert.deepEqual(validateTournament(['A', 'B', 'C']), []);
   assert.deepEqual(validateTournament(['A', 'B', 'a']), ['duplicate-name']);
   assert.deepEqual(validateTournament(names(30)), []);
   assert.deepEqual(validateTournament(names(121)), ['too-many']);
   assert.deepEqual(validateTournament(['A', 'B', 'x'.repeat(41)]), ['name-too-long']);
+});
+
+test('els noms repetits es diuen un sol cop i tal com s’han escrit primer', () => {
+  assert.deepEqual(repeatedNames(['Maria', 'Joan', 'maria', 'Pere', 'MARIA', 'joan']), ['Maria', 'Joan']);
+  assert.deepEqual(repeatedNames(['Anna', 'Biel']), []);
 });
 
 // ---------- Torneig ----------
@@ -322,10 +343,28 @@ test('els set premis de la presentació respecten l’ordre, els empats i les ro
   assert.equal(prizes[2].value, 250);
   assert.equal(prizes[3].value, 1);
   assert.deepEqual(prizes[3].names, ['Jugador 2', 'Jugador 3', 'Jugador 4']);
+  assert.match(prizes[3].description, /suborn a la resta/);
   assert.deepEqual(prizes[6].names, ['Jugador 2', 'Jugador 3', 'Jugador 4']);
   assert.deepEqual(prizes[5].names, []);
   assert.equal(prizes[0].statistic, '250 punts · 250 més que el primer lloc (Jugador 2, Jugador 3 i Jugador 4)');
   assert.equal(prizes[6].statistic, '0 punts · 250 menys que el quart lloc (Jugador 1)');
+});
+
+test('si ningú fa cap ronda a zero, el premi queda desert sense canviar l’ordre', () => {
+  const t = createTournament({ name: 'Sense zeros', players: names(3), games: 1, rounds: 1,
+    schedule: [[[0, 1, 2]]] });
+  t.results['0-0'] = { rounds: [{ papayoo: 0, points: [100, 70, 80] }] };
+  const rows = tournamentStandings(t);
+  const prizes = presentationAwards(rows);
+  assert.deepEqual(prizes.map(prize => prize.key),
+    ['spoon', 'papayoo', 'record', 'zeros', 'place-3', 'place-2', 'place-1']);
+  assert.deepEqual(prizes[3].names, []);
+  assert.equal(prizes[3].statistic, 'Ningú ha fet cap ronda a zero');
+  assert.deepEqual(prizes[1].names, ['Jugador 1']);
+  // Amb dades reals sempre hi ha algú que s'endú el Papayoo, però el cas buit també té text.
+  const papayoo = presentationAwards(rows.map(row => ({ ...row, papayoos: 0 })))[1];
+  assert.deepEqual(papayoo.names, []);
+  assert.equal(papayoo.statistic, 'Ningú s’ha endut cap Papayoo');
 });
 
 test('les diferències del podi indiquen la posició i el nom del rival', () => {

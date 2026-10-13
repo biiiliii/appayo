@@ -1,5 +1,6 @@
 // API del torneig: el servidor és l'única font dels sortejos, rondes i resultats.
-import { randomBytes, randomUUID, createHash, scryptSync, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, createHash, scrypt, timingSafeEqual } from 'node:crypto';
+import { promisify } from 'node:util';
 import QRCode from 'qrcode';
 import { db } from './db.js';
 import { PAPAYOO_POINTS } from '../frontend/logic.js';
@@ -7,7 +8,8 @@ import { normalizeSharedGame } from '../frontend/share.js';
 import { reserveTournamentCode } from './code.js';
 import {
   validateTournament, tableSizes, makeSchedule, createTournament, tableNames,
-  progress, tournamentStandings, presentationAwards, tableWave, activeWave,
+  progress, tournamentStandings, presentationAwards, tableWave, gameWaves, activeWave, repeatedNames, joinNames,
+  MIN_PLAYERS, MAX_PLAYERS, MAX_TOURNAMENT_PLAYERS, MAX_GAMES, MAX_ROUNDS,
 } from './tournament.js';
 
 const token = () => randomBytes(24).toString('base64url');
@@ -24,16 +26,19 @@ async function qrResponse(url) {
   return new Response(svg, { headers: { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
 
-function hashPassword(password) {
+// La versió asíncrona no bloqueja el servidor mentre es calcula; el format desat continua sent `salt:hex`.
+const scryptAsync = promisify(scrypt);
+
+async function hashPassword(password) {
   const salt = randomBytes(16).toString('hex');
-  return `${salt}:${scryptSync(password, salt, 32).toString('hex')}`;
+  return `${salt}:${(await scryptAsync(password, salt, 32)).toString('hex')}`;
 }
 
-function passwordMatches(password, stored) {
+async function passwordMatches(password, stored) {
   const [salt, hex] = stored.split(':');
   if (!salt || !hex) return false;
   const wanted = Buffer.from(hex, 'hex');
-  const actual = scryptSync(password, salt, wanted.length);
+  const actual = await scryptAsync(password, salt, wanted.length);
   return timingSafeEqual(wanted, actual);
 }
 
@@ -70,8 +75,9 @@ function validateRound(round, size) {
     && round.points.reduce((a, b) => a + b, 0) === 250;
 }
 
+// Sense ORDER BY, PostgreSQL retorna les taules modificades al final i la llista canvia d'ordre.
 async function rowsFor(conn, id) {
-  return conn.query('SELECT game_index, table_index, rounds, updated_at FROM tournament_tables WHERE tournament_id = ?', [id]);
+  return conn.query('SELECT game_index, table_index, rounds, updated_at FROM tournament_tables WHERE tournament_id = ? ORDER BY game_index, table_index', [id]);
 }
 
 function snapshot(row, tableRows, { includeSecrets = false, includeScores = false } = {}) {
@@ -90,12 +96,13 @@ function snapshot(row, tableRows, { includeSecrets = false, includeScores = fals
     return { game: item.game_index, table: item.table_index, wave: tableWave(t, item.table_index), rounds: rounds.length, finished };
   });
   const currentWave = activeWave(t, new Set(Object.keys(results)));
+  const revealStep = Number(row.revealed);
   for (const table of tables) {
     table.active = table.game === currentWave?.game && table.wave === currentWave.wave;
-    if (!includeSecrets && table.active && !table.finished)
+    // Una taula acabada encara es pot reobrir per corregir una ronda, fins que comencen els resultats.
+    if (!includeSecrets && ((table.active && !table.finished) || (table.finished && revealStep === 0)))
       table.entryPath = `/tournaments/table/${t.links[table.game][table.table]}`;
   }
-  const revealStep = Number(row.revealed);
   const visibleRevealStep = includeSecrets || revealStep >= 8 ? revealStep : 0;
   const view = {
     id: t.id, name: t.name, createdAt: t.createdAt, games: t.games,
@@ -127,37 +134,59 @@ async function create(conn, request) {
   const { name, players, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable, password } = body ?? {};
   if (typeof name !== 'string' || !name.trim() || name.length > 60) return error('El nom del torneig no és vàlid.');
   if (typeof password !== 'string' || !password.length) return error('Cal indicar una contrasenya.');
+  if (password.length < 4) return error('La contrasenya ha de tenir almenys 4 caràcters.');
   if (password.length > 200) return error('La contrasenya és massa llarga.');
   const initialOnly = players === undefined && games === undefined && rounds === undefined
     && simultaneousTables === undefined && weightUnevenTables === undefined && playersPerTable === undefined;
-  const clean = initialOnly ? null : validConfiguration({ players, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable });
-  if (!initialOnly && !clean) return error('La configuració del torneig no és vàlida.');
+  const config = initialOnly ? null : validConfiguration({ players, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable });
+  if (config?.error) return error(config.error);
   const createdAt = Date.now();
-  const passwordHash = hashPassword(password);
+  const passwordHash = await hashPassword(password);
   const id = await reserveTournamentCode(async code => {
     const draft = { id: code, name: name.trim(), createdAt, phase: 'configuring' };
     const rows = await conn.query('INSERT INTO tournaments (id, name, password_hash, data, revealed, created_at) VALUES (?, ?, ?, ?, 0, ?) ON CONFLICT (id) DO NOTHING RETURNING id',
       [code, draft.name, passwordHash, JSON.stringify(draft), createdAt]);
     return rows.length > 0;
   });
-  if (clean) await configure(conn, id, { players: clean, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable });
+  if (config) await configure(conn, id, { players: config.players, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable });
   return reply({ id, token: await issueSession(conn, id) }, 201);
 }
 
+// Per ordre: un nom llarg sol voler dir que s'han enganxat diversos noms en una línia, i això explica els altres errors.
+const playerProblems = {
+  'name-too-long': () => 'Hi ha un nom molt llarg. Potser hi falta un salt de línia: cada jugador ha d’anar en una línia.',
+  'too-few': () => `Calen com a mínim ${MIN_PLAYERS} jugadors.`,
+  'too-many': () => `Com a màxim ${MAX_TOURNAMENT_PLAYERS} jugadors.`,
+  'duplicate-name': players => `Hi ha noms repetits: ${joinNames(repeatedNames(players))}. Afegeix-hi el cognom o una inicial.`,
+};
+const between = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
+
+/** `{ players }` amb els noms nets, o `{ error }` amb un missatge que l'organitzador pugui arreglar. */
 function validConfiguration({ players, games, rounds, simultaneousTables, weightUnevenTables, playersPerTable }) {
-  if (!Array.isArray(players) || !players.every(p => typeof p === 'string')) return null;
+  if (!Array.isArray(players) || !players.every(p => typeof p === 'string')) return { error: 'La llista de jugadors no és vàlida.' };
   const clean = players.map(p => p.trim());
-  if (clean.some(p => !p) || validateTournament(clean).length) return null;
-  if (!Number.isInteger(games) || games < 1 || games > 10 || !Number.isInteger(rounds) || rounds < 1 || rounds > 20) return null;
-  if (simultaneousTables !== undefined && (!Number.isInteger(simultaneousTables) || simultaneousTables < 1 || simultaneousTables > 120)) return null;
-  if (weightUnevenTables !== undefined && typeof weightUnevenTables !== 'boolean') return null;
-  if (playersPerTable !== undefined && (!Number.isInteger(playersPerTable) || playersPerTable < 2 || playersPerTable > 8)) return null;
-  return clean;
+  if (clean.some(p => !p)) return { error: 'Hi ha algun jugador sense nom.' };
+  const found = validateTournament(clean);
+  const problem = Object.keys(playerProblems).find(code => found.includes(code));
+  if (problem) return { error: playerProblems[problem](clean) };
+  if (!between(games, 1, MAX_GAMES)) return { error: `El nombre de partides ha de ser entre 1 i ${MAX_GAMES}.` };
+  if (!between(rounds, 1, MAX_ROUNDS)) return { error: `El nombre de rondes per partida ha de ser entre 1 i ${MAX_ROUNDS}.` };
+  if (playersPerTable !== undefined && !between(playersPerTable, MIN_PLAYERS, MAX_PLAYERS))
+    return { error: `Cada taula ha de tenir entre ${MIN_PLAYERS} i ${MAX_PLAYERS} jugadors.` };
+  if (simultaneousTables !== undefined && !between(simultaneousTables, 1, MAX_TOURNAMENT_PLAYERS))
+    return { error: `Les taules simultànies han de ser entre 1 i ${MAX_TOURNAMENT_PLAYERS}.` };
+  if (weightUnevenTables !== undefined && typeof weightUnevenTables !== 'boolean')
+    return { error: 'L’opció de ponderar les taules irregulars no és vàlida.' };
+  return { players: clean };
 }
 
 async function configure(conn, id, body) {
-  const clean = validConfiguration(body ?? {});
-  if (!clean) return error('La configuració del torneig no és vàlida.');
+  const config = validConfiguration(body ?? {});
+  if (config.error) return error(config.error);
+  const clean = config.players;
+  const desiredPlayers = body.playersPerTable ?? 5;
+  // El sorteig es fa abans de bloquejar la fila: amb molts jugadors triga una mica i no depèn de la base de dades.
+  const schedule = makeSchedule(clean.length, body.games, Math.random, desiredPlayers);
   return conn.transaction(async tx => {
     // Aquest UPDATE bloqueja la fila fins al final de la transacció en PostgreSQL.
     await tx.query('UPDATE tournaments SET name = name WHERE id = ?', [id]);
@@ -165,10 +194,8 @@ async function configure(conn, id, body) {
     if (!row) return error('Aquest torneig no existeix.', 404);
     const draft = JSON.parse(row.data);
     if (draft.phase !== 'configuring') return error('Aquest torneig ja està configurat.', 409);
-    const desiredPlayers = body.playersPerTable ?? 5;
     const t = createTournament({
-      name: draft.name, players: clean, games: body.games, rounds: body.rounds,
-      schedule: makeSchedule(clean.length, body.games, Math.random, desiredPlayers),
+      name: draft.name, players: clean, games: body.games, rounds: body.rounds, schedule,
       simultaneousTables: body.simultaneousTables ?? tableSizes(clean.length, desiredPlayers).length,
       weightUnevenTables: body.weightUnevenTables ?? true,
       playersPerTable: desiredPlayers,
@@ -246,15 +273,17 @@ export async function handleApi(request, route = new URL(request.url).pathname) 
     const conn = await db();
     const path = route.replace(/^\/api\/v1\/?/, '/').replace(/\/$/, '') || '/';
     const parts = path.split('/').filter(Boolean);
-    if (parts[0] === 'shared-games') return sharedGameRoute(conn, request, parts);
-    if (request.method === 'POST' && path === '/tournaments') return create(conn, request);
+    // Cal `return await`: sense, un JSON mal format o un error de la base de dades s'escaparia del catch.
+    if (parts[0] === 'shared-games') return await sharedGameRoute(conn, request, parts);
+    if (request.method === 'POST' && path === '/tournaments') return await create(conn, request);
     if (parts[0] === 'tournaments' && /^[A-Za-z0-9_-]{5,}$/.test(parts[1] ?? '')) {
-      const id = parts[1];
+      // Els codis són consonants majúscules: un enllaç escrit en minúscules també ha de funcionar.
+      const id = /^[A-Za-z]+$/.test(parts[1]) ? parts[1].toUpperCase() : parts[1];
       const row = await tournament(conn, id);
       if (!row) return error('Aquest torneig no existeix.', 404);
       if (request.method === 'POST' && parts[2] === 'login' && parts.length === 3) {
         const body = await readBody(request);
-        if (typeof body?.password !== 'string' || !passwordMatches(body.password, row.password_hash))
+        if (typeof body?.password !== 'string' || !await passwordMatches(body.password, row.password_hash))
           return error('Contrasenya incorrecta.', 401);
         return reply({ id, name: row.name, token: await issueSession(conn, id) });
       }
@@ -262,13 +291,13 @@ export async function handleApi(request, route = new URL(request.url).pathname) 
         return reply(snapshot(row, await rowsFor(conn, id), { includeScores: Number(row.revealed) >= 8 }));
       if (request.method === 'GET' && parts[2] === 'qr' && parts.length === 3) {
         const url = new URL(`/tournaments/spectate/${id}`, request.url).href;
-        return qrResponse(url);
+        return await qrResponse(url);
       }
       if (!await authorize(conn, request, id)) return error('Cal identificar-se com a organitzador.', 401);
       if (request.method === 'PUT' && parts[2] === 'configure' && parts.length === 3)
-        return configure(conn, id, await readBody(request));
+        return await configure(conn, id, await readBody(request));
       if (request.method === 'PUT' && parts[2] === 'name' && parts.length === 3)
-        return renameTournament(conn, id, await readBody(request));
+        return await renameTournament(conn, id, await readBody(request));
       if (request.method === 'GET' && parts.length === 2)
         return reply(snapshot(row, await rowsFor(conn, id), { includeSecrets: true, includeScores: Number(row.revealed) >= 2 }));
       if (JSON.parse(row.data).phase === 'configuring') return error('Primer cal configurar el torneig.', 409);
@@ -307,10 +336,11 @@ export async function handleApi(request, route = new URL(request.url).pathname) 
       const table = {
         tournamentId: t.id, tournamentName: t.name, game: item.game_index, table: item.table_index,
         players: tableNames(t, item.game_index, item.table_index), roundsPlanned: t.rounds,
-        rounds: savedRounds, wave, active, revealed: Boolean(row.revealed),
+        rounds: savedRounds, wave, waves: gameWaves(t, item.game_index), active, revealed: Boolean(row.revealed),
+        version: Number(item.updated_at),
       };
       if (request.method === 'GET' && parts[2] === 'qr' && parts.length === 3)
-        return qrResponse(new URL(`/tournaments/table/${parts[1]}`, request.url).href);
+        return await qrResponse(new URL(`/tournaments/table/${parts[1]}`, request.url).href);
       if (request.method === 'GET' && parts.length === 2) return reply(table);
       if (request.method === 'PUT' && parts[2] === 'rounds' && parts.length === 3) {
         const closedMessage = 'Les puntuacions estan tancades perquè ja han començat els resultats.';
@@ -320,21 +350,36 @@ export async function handleApi(request, route = new URL(request.url).pathname) 
         const rounds = body?.rounds;
         if (!Array.isArray(rounds) || rounds.length > t.rounds || !rounds.every(r => validateRound(r, table.players.length)))
           return error('Les rondes no són vàlides.');
-        const saved = await conn.transaction(async tx => {
+        // Només es desa el que compta de cada ronda.
+        const plain = list => list.map(r => ({ papayoo: r.papayoo, points: r.points }));
+        const incoming = plain(rounds);
+        const [status, result] = await conn.transaction(async tx => {
           const open = await tx.query('UPDATE tournaments SET revealed = revealed WHERE id = ? AND revealed = 0 RETURNING id', [t.id]);
-          if (!open.length) return false;
+          if (!open.length) return [409, { error: closedMessage }];
+          // Amb el torneig bloquejat, es torna a llegir la taula: un altre mòbil hi pot haver desat mentrestant.
+          const current = (await tx.query('SELECT rounds, updated_at FROM tournament_tables WHERE token_hash = ?', [item.token_hash]))[0];
+          const saved = JSON.parse(current.rounds);
+          const version = Number(current.updated_at);
+          const done = { saved: incoming.length, finished: incoming.length === t.rounds };
+          // Un reintent del mateix enviament: ja està desat.
+          if (JSON.stringify(incoming) === JSON.stringify(plain(saved))) return [200, { ...done, version }];
+          // Cap pantalla esborra rondes: si n'arriben menys, el mòbil no ha vist les últimes.
+          if (incoming.length < saved.length) return [409, { error: 'Aquesta taula ja té més rondes desades des d’un altre mòbil.',
+            conflict: true, rounds: saved, version }];
+          if (typeof body.base === 'number' && body.base !== version) return [409, {
+            error: 'Des d’un altre mòbil s’han desat canvis en aquesta taula. Revisa les rondes.', conflict: true, rounds: saved, version }];
+          const next = Math.max(Date.now(), version + 1);
           await tx.query('UPDATE tournament_tables SET rounds = ?, updated_at = ? WHERE token_hash = ?',
-            [JSON.stringify(rounds), Date.now(), item.token_hash]);
-          return true;
+            [JSON.stringify(incoming), next, item.token_hash]);
+          return [200, { ...done, version: next }];
         });
-        if (!saved) return error(closedMessage, 409);
-        return reply({ saved: rounds.length, finished: rounds.length === t.rounds });
+        return reply(result, status);
       }
     }
     return error('Ruta no trobada.', 404);
   } catch (err) {
     if (err instanceof SyntaxError) return error('El format de la petició no és vàlid.');
-    if (err.message === 'La petició és massa gran.') return error(err.message, 413);
+    if (err?.message === 'La petició és massa gran.') return error(err.message, 413);
     console.error(err);
     return error('No s’ha pogut completar la petició.', 500);
   }

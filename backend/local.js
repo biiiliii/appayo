@@ -16,15 +16,23 @@ const types = {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
   if (url.pathname.startsWith('/api/v1/')) {
-    const request = new Request(url, {
-      method: req.method,
-      headers: req.headers,
-      body: ['GET', 'HEAD'].includes(req.method) ? undefined : req,
-      duplex: 'half',
-    });
-    const response = await handleApi(request);
-    res.writeHead(response.status, Object.fromEntries(response.headers));
-    res.end(Buffer.from(await response.arrayBuffer()));
+    // Cap error d'una petició ha d'aturar el servidor de desenvolupament.
+    try {
+      const request = new Request(url, {
+        method: req.method,
+        headers: req.headers,
+        body: ['GET', 'HEAD'].includes(req.method) ? undefined : req,
+        duplex: 'half',
+      });
+      const response = await handleApi(request);
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      res.end(Buffer.from(await response.arrayBuffer()));
+    } catch (err) {
+      console.error(err);
+      if (res.headersSent) { res.end(); return; }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ error: 'No s’ha pogut completar la petició.' }));
+    }
     return;
   }
   if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); res.end(); return; }
