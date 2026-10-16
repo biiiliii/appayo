@@ -15,8 +15,17 @@
 .tour-table-context { margin: 0; font-size: clamp(18px, 2.5vw, 23px); font-weight: 700; }
 .tour-table-rounds { margin: 8px 0 0; color: var(--ink-2); }
 .tour-table-return { margin-top: 16px; text-decoration: none; }
-.tour-stage-progress { padding: 26px 0 22px; border-bottom: 1px solid var(--rule); }
-.tour-stage-title { margin: 0 0 14px; text-align: center; font-size: clamp(20px, 2.5vw, 30px); line-height: 1.2; }
+.tour-stage-progress { container-type: inline-size; padding: 26px 0 22px; border-bottom: 1px solid var(--rule); }
+.tour-stage-heading { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 6px; }
+.tour-stage-heading.is-spectate { margin-bottom: 14px; }
+.tour-stage-title { margin: 0; text-align: center; font-size: clamp(20px, 2.5vw, 30px); line-height: 1.2; }
+.tour-stage-draw-link { align-self: end; justify-self: end; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; }
+.tour-stage-draw-link:hover { color: var(--ink-2); }
+@container (min-width: 700px) {
+  .tour-stage-heading { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 0; }
+  .tour-stage-title { grid-column: 2; padding-bottom: 12px; }
+  .tour-stage-draw-link { grid-column: 3; }
+}
 .tour-stage-meter { height: 16px; overflow: hidden; border-radius: 999px; background: var(--rule); }
 .tour-stage-fill { display: block; height: 100%; border-radius: inherit; background: var(--green-deep); transition: width .35s ease; }
 .tour-spectate-instruction { margin: 16px 0 0; color: var(--ink-2); text-align: center; }
@@ -258,7 +267,6 @@
 @keyframes place-in { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ---- Espectacle del sorteig: cartes amb els noms repartides sobre tapets ---- */
-.tour-stage-actions { display: flex; justify-content: center; margin-top: 14px; }
 .draw-show { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden;
   background: radial-gradient(ellipse 90% 70% at 50% 38%, #213b2d, #15261d 62%, #0e1a13); color: #eef1e8; }
 .draw-show[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }

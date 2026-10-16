@@ -1015,12 +1015,11 @@ function status(data, admin) {
     h('div', { class: 'tour-cards' }, hiddenFinishedTables.map(table => tableCard(table, true)))) : null;
   return h('div', {}, admin ? tournamentHeader(data) : spectateHeader(data),
     h('section', { class: 'tour-stage-progress' },
-      h('h2', { class: 'tour-stage-title' }, progressLabel),
+      h('div', { class: `tour-stage-heading${admin ? '' : ' is-spectate'}` },
+        h('h2', { class: 'tour-stage-title' }, progressLabel),
+        admin && !allFinished ? h('button', { class: 'tour-stage-draw-link', type: 'button', onclick: showDraw }, 'Mira sorteig') : null),
       h('div', { class: `tour-stage-meter${data.phase === 'playing' ? ' is-playing' : ''}`, role: 'progressbar', 'aria-label': 'Progrés del torneig',
-        'aria-valuemin': '0', 'aria-valuemax': String(progress.total), 'aria-valuenow': String(progress.completed) }, progressFill),
-      !allFinished ? h('div', { class: 'tour-stage-actions' },
-        h('button', { class: 'btn outline small', type: 'button', onclick: showDraw },
-          data.games > 1 ? `Mira el sorteig de la partida ${drawGame + 1}` : 'Mira el sorteig')) : null),
+        'aria-valuemin': '0', 'aria-valuemax': String(progress.total), 'aria-valuenow': String(progress.completed) }, progressFill)),
     !admin && visibleTables.some(({ current }) => current.active && !current.finished && current.entryPath)
       ? h('p', { class: 'tour-spectate-instruction' }, 'Toca la teva taula per apuntar-ne els punts') : null,
     notice(),
