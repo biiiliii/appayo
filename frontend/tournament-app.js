@@ -713,13 +713,17 @@ function configureTournament() {
 }
 
 let revealBusy = false;
-async function changeReveal(next) {
+const revealStage = { step: null, phase: 0 };
+const visibleRevealSlide = { key: null, phase: 0 };
+async function changeReveal(next, phase = 0) {
   if (revealBusy || !Number.isInteger(next) || next < 1 || next > 9) return;
   revealBusy = true;
   const id = state.id;
   try {
     await api(`/tournaments/${id}/reveal`, { method: 'PUT',
       headers: { Authorization: `Bearer ${session(id)?.token}` }, body: JSON.stringify({ step: next }) });
+    revealStage.step = next;
+    revealStage.phase = phase;
     const target = next === 9 ? tournamentPaths.resultsTable(id) : tournamentPaths.results(id);
     if (location.pathname !== target) location.assign(target);
     else await refresh();
@@ -727,28 +731,57 @@ async function changeReveal(next) {
   finally { revealBusy = false; }
 }
 
+function advanceReveal(step, direction) {
+  if (revealBusy) return;
+  if (direction > 0 && step >= 2 && step <= 8 && revealStage.phase < 2) {
+    revealStage.phase++;
+    render();
+  } else if (direction < 0 && step >= 2 && step <= 8 && revealStage.phase > 0) {
+    revealStage.phase--;
+    render();
+  } else if (step + direction >= 1 && step + direction <= 9) {
+    changeReveal(step + direction, direction < 0 && step - 1 >= 2 ? 2 : 0);
+  }
+}
+
 function revealNavigation(step) {
   return h('nav', { class: 'tour-reveal-nav', 'aria-label': 'Diapositives dels resultats' },
     h('button', { class: 'btn outline', type: 'button', ...(step === 1 ? { disabled: '' } : {}),
-      onclick: () => changeReveal(step - 1) }, '← Anterior'),
+      onclick: () => advanceReveal(step, -1) }, '← Anterior'),
     h('button', { class: 'btn', type: 'button', ...(step === 9 ? { disabled: '' } : {}),
-      onclick: () => changeReveal(step + 1) }, step === 8 ? 'Mostra la taula final →' : 'Següent →'));
+      onclick: () => advanceReveal(step, 1) },
+    step >= 2 && step <= 8 && revealStage.phase === 0 ? 'Revela l’estadística →'
+      : step >= 2 && step <= 8 && revealStage.phase === 1 ? 'Revela el nom →'
+        : step === 8 ? 'Mostra la taula final →' : 'Següent →'));
 }
 
 function resultsSlideshow(data, admin) {
   const intro = data.revealStep === 1;
   const award = data.award;
+  const slideKey = `${data.id}:${admin}:${data.revealStep}`;
+  const firstRender = visibleRevealSlide.key !== slideKey;
+  if (admin && revealStage.step !== data.revealStep) {
+    revealStage.step = data.revealStep;
+    revealStage.phase = 0;
+  }
+  const phase = admin ? revealStage.phase : 2;
+  const revealStatistic = !firstRender && visibleRevealSlide.phase < 1 && phase >= 1;
+  const revealName = !firstRender && visibleRevealSlide.phase < 2 && phase >= 2;
+  visibleRevealSlide.key = slideKey;
+  visibleRevealSlide.phase = phase;
   const slide = h('section', { class: 'tour-reveal-slide' },
     h('h1', { class: 'tour-reveal-title' }, intro ? 'Ha arribat el moment dels premis' : award?.title ?? 'Resultats'),
     h('p', { class: 'tour-reveal-description' }, intro
       ? 'Set reconeixements i una classificació final. Descobrim-los plegats.' : award?.description ?? ''),
-    intro ? null : h('div', { class: 'tour-award-label' },
+    intro ? null : h('div', { class: 'tour-award-label', 'aria-hidden': phase < 1 ? 'true' : 'false' },
       h('p', { class: 'tour-reveal-statistic' }, award?.statistic ?? ''),
-      h('p', { class: 'tour-reveal-names' }, award?.names?.length
-        ? `${award.names.length > 1 ? 'Empat: ' : ''}${join(award.names)}` : 'Sense guanyador')));
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) slide.classList.add('show-description', 'show-statistic', 'show-names');
-  else for (const [delay, className] of [[2000, 'show-description'], [5000, 'show-statistic'], [9000, 'show-names']])
-    setTimeout(() => { if (root.contains(slide)) slide.classList.add(className); }, delay);
+      h('p', { class: 'tour-reveal-names', 'aria-hidden': phase < 2 ? 'true' : 'false' }, award?.names?.length
+        ? `${award.names.length > 1 ? 'Empat: ' : ''}${join(award.names)}` : 'Premi desert')));
+  if (firstRender) slide.classList.add('is-new');
+  if (revealStatistic) slide.classList.add('is-new-statistic');
+  if (revealName) slide.classList.add('is-new-name');
+  if (phase >= 1) slide.classList.add('show-statistic');
+  if (phase >= 2) slide.classList.add('show-names');
   return h('div', { class: 'tour-reveal-page' }, admin ? tournamentHeader(data, false) : spectateHeader(data),
     notice(), slide, admin ? revealNavigation(data.revealStep) : null);
 }
@@ -1165,6 +1198,15 @@ function route() {
 
 window.addEventListener('hashchange', route);
 window.addEventListener('popstate', route);
+window.addEventListener('keydown', event => {
+  if (!['Enter', 'ArrowRight', 'ArrowLeft'].includes(event.key)
+      || !['results', 'results_table'].includes(state.mode) || !state.data
+      || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+      || event.target.closest?.('input, textarea, select, [contenteditable="true"]')
+      || (event.key === 'Enter' && event.target.closest?.('button, a'))) return;
+  event.preventDefault();
+  advanceReveal(state.data.revealStep, event.key === 'ArrowLeft' ? -1 : 1);
+});
 const needsLiveRefresh = () => state.mode === 'configure' || state.mode === 'admin' || state.mode === 'view'
   || (state.mode === 'table' && !state.data?.revealed);
 window.addEventListener('online', () => { if (needsLiveRefresh()) refresh(); });

@@ -449,20 +449,25 @@ export function presentationAwards(rows) {
     const next = Math.min(...played.map(row => row.total).filter(total => total > value));
     const difference = Number.isFinite(next) ? next - value : null;
     const nextRows = difference === null ? [] : played.filter(row => row.total === next);
-    return { key: `place-${rank}`, title, description: rank === 1 ? 'El torneig ja té guanyador!' : 'Un lloc ben merescut al podi.',
+    const descriptions = {
+      1: 'Per haver demostrat una sang freda inhumana, uns reflexos matemàtics impecables i una capacitat gairebé mística per fer flotar les cartes radioactives directament cap a les mans de la resta de la taula. S’ha coronat com la persona amb menys punts de tot el torneig, deixant el pavelló del càlcul de bases al nivell més alt possible!',
+      2: 'Per haver esquivat Payoos i Papayoos amb una elegància que faria sospitar fins i tot el dau de vuit cares. Només un sospir de punts l’ha separat del cim, però arribar fins aquí entre cartes traïdores i rivals de mirada afilada mereix una ovació de tota la taula!',
+      3: 'Per haver resistit cada mà amb el cap fred, els ulls ben oberts i una habilitat admirable per deixar els punts a casa de la resta. Entre girs de guió, set de colors i algun ensurt memorable, s’ha guanyat un lloc al podi i un diploma que no crema gens!',
+    };
+    return { key: `place-${rank}`, title, description: descriptions[rank],
       names: winners.map(row => row.name), value, difference,
       statistic: `${fmtPoints(value)} punts${difference === null ? '' : ` · ${fmtPoints(difference)} menys que ${reference(nextRows)}`}` };
   };
   return [
-    maximum('spoon', 'Major puntuació', 'Algú havia d’endur-se tots aquests punts.', row => row.total,
+    maximum('spoon', 'Premi Escombra', 'Per haver demostrat una generositat sense límits sacrificant el seu propi marcador pel bé de les companyes i els companys de taula. Acumular la major puntuació global del torneig requereix una resistència psicològica a prova de bombes i un somriure incombustible. Gràcies per netejar la taula de punts i fer feliç la resta!', row => row.total,
       (value, difference, nextRows) => `${fmtPoints(value)} punts${difference === null ? '' : ` · ${fmtPoints(difference)} més que ${reference(nextRows)}`}`),
-    maximum('papayoo', 'Més Papayoos menjats', 'Potser no ha entès que restaven 40 punts!', row => row.papayoos,
+    maximum('papayoo', 'L’imant de Papayoos', 'Per posseir un camp gravitatori propi que, al llarg del torneig, ha atret de manera sistemàtica, viciosa i absolutament inevitable tots els maleïts set de color que ha marcat el dau de vuit cares. No sabem si és una maledicció còsmica o amor absolut pel perill, però s’ha endut la col·lecció de Papayoos més gran que recordarem mai!', row => row.papayoos,
       value => `${value} ${value === 1 ? 'Papayoo' : 'Papayoos'}`, 'Ningú s’ha endut cap Papayoo'),
-    maximum('record', 'Més punts en una ronda', 'Una sola ronda que costarà d’oblidar.', row => row.worst,
+    maximum('record', 'Premi a la gran cremada', 'Per haver protagonitzat l’explosió de punts més catastròfica, apocalíptica i, per què negar-ho, increïblement divertida de veure en una sola ronda. Emportar-se tants punts de cop trenca tots els esquemes matemàtics i mereix aquest reconeixement heroic: caure amb estil i fer història al club!', row => row.worst,
       value => `${fmtPoints(value)} punts en una ronda`),
-    maximum('zeros', 'Més rondes a zero', 'Perfeccionisme, suborn a la resta, o molta sort. No ho sabrem mai.', row => row.zeros,
+    maximum('zeros', 'Mestria del zero', 'Per haver assolit l’estat de «Nirvana Cartòfil» i passar, al llarg del torneig, com una ombra invisible per sobre de les taules més calentes. Acabar rondes senceres amb zero punts mentre el món s’encén al seu voltant amb Payoos i Papayoos volant no és sort: és art pur, és elegància i és gairebé un miracle ignífug.', row => row.zeros,
       value => `${value} ${value === 1 ? 'ronda' : 'rondes'} a zero`, 'Ningú ha fet cap ronda a zero'),
-    position(3, 'Tercer lloc'), position(2, 'Segon lloc'), position(1, 'Primer lloc'),
+    position(3, 'Tercer lloc'), position(2, 'Segon lloc'), position(1, 'Campió/ona absolut/a'),
   ];
 }
 

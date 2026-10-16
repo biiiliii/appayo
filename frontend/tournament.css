@@ -130,15 +130,20 @@
 .tour-results-actions { justify-content: center; margin-top: clamp(48px, 8vh, 96px); }
 .tour-reveal-page, .tour-final-page { padding-bottom: 94px; }
 .tour-reveal-slide { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: calc(100dvh - 190px); padding: 46px 18px 100px; text-align: center; }
-.tour-reveal-title { max-width: 18ch; margin: 0; font-size: clamp(38px, 6vw, 72px); line-height: 1.05; letter-spacing: -.035em; animation: tour-reveal-in .6s ease both; }
-.tour-reveal-description, .tour-reveal-statistic, .tour-reveal-names { opacity: 0; transform: translateY(14px); transition: opacity .55s ease, transform .55s ease; }
+.tour-reveal-title { max-width: 18ch; margin: 0; font-size: clamp(38px, 6vw, 72px); line-height: 1.05; letter-spacing: -.035em; }
+.tour-reveal-slide.is-new .tour-reveal-title { animation: tour-reveal-in .6s ease both; }
+.tour-reveal-statistic, .tour-reveal-names { opacity: 0; transform: translateY(14px); transition: opacity .55s ease, transform .55s ease; }
 .tour-reveal-description { max-width: 54ch; margin: 28px 0 0; color: var(--ink-2); font-size: clamp(18px, 2vw, 24px); }
-.tour-award-label { display: flex; flex-direction: column; align-items: center; width: min(100%, 680px); box-sizing: border-box; margin-top: 42px; padding: clamp(22px, 4vw, 38px); border: 1px solid var(--rule); border-radius: 12px; background: var(--sheet); box-shadow: 0 12px 32px #15261d12; opacity: 0; transform: translateY(14px) rotate(-1deg); transition: opacity .55s ease, transform .55s ease; }
-.tour-reveal-slide.show-statistic .tour-award-label { opacity: 1; transform: rotate(-1deg); }
+.tour-award-label { display: flex; flex-direction: column; align-items: center; visibility: hidden; width: min(100%, 680px); box-sizing: border-box; margin-top: 42px; padding: clamp(22px, 4vw, 38px); border: 1px solid var(--rule); border-radius: 12px; background: var(--sheet); box-shadow: 0 12px 32px #15261d12; opacity: 0; transform: translateY(14px) rotate(-1deg); transition: opacity .55s ease, transform .55s ease; }
+.tour-reveal-slide.show-statistic .tour-award-label { visibility: visible; opacity: 1; transform: rotate(-1deg); }
+.tour-reveal-slide.is-new-statistic .tour-award-label { animation: tour-award-in .55s ease both; }
 .tour-reveal-statistic { order: 2; margin: 0; padding-top: 22px; border-top: 1px solid var(--rule); color: var(--green-deep); font-size: clamp(21px, 2.7vw, 32px); font-weight: 800; }
-.tour-reveal-names { order: 1; display: flex; align-items: center; justify-content: center; max-width: 24ch; min-height: 1.8em; margin: 0 0 20px; overflow-wrap: anywhere; font-size: clamp(32px, 4.8vw, 58px); font-weight: 800; font-stretch: 90%; font-variation-settings: "opsz" 96; letter-spacing: -.02em; line-height: 1.1; }
-.tour-reveal-slide.show-description .tour-reveal-description, .tour-reveal-slide.show-statistic .tour-reveal-statistic, .tour-reveal-slide.show-names .tour-reveal-names { opacity: 1; transform: none; }
+.tour-reveal-names { order: 1; display: flex; visibility: hidden; align-items: center; justify-content: center; max-width: 24ch; min-height: 1.8em; margin: 0 0 20px; overflow-wrap: anywhere; font-size: clamp(32px, 4.8vw, 58px); font-weight: 800; font-stretch: 90%; font-variation-settings: "opsz" 96; letter-spacing: -.02em; line-height: 1.1; }
+.tour-reveal-slide.show-statistic .tour-reveal-statistic, .tour-reveal-slide.show-names .tour-reveal-names { opacity: 1; transform: none; }
+.tour-reveal-slide.show-names .tour-reveal-names { visibility: visible; }
+.tour-reveal-slide.is-new-name .tour-reveal-names { animation: tour-reveal-in .55s ease both; }
 @keyframes tour-reveal-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes tour-award-in { from { opacity: 0; transform: translateY(14px) rotate(-1deg); } to { opacity: 1; transform: rotate(-1deg); } }
 .tour-reveal-nav { position: fixed; z-index: 5; right: clamp(18px, 4vw, 60px); bottom: max(20px, env(safe-area-inset-bottom)); left: clamp(18px, 4vw, 60px); display: flex; justify-content: space-between; gap: 12px; pointer-events: none; }
 .tour-reveal-nav .btn { pointer-events: auto; box-shadow: 0 4px 18px #15261d20; }
 .tour-final-content { margin: 34px auto 0; }
@@ -163,7 +168,7 @@
 .tour-results-games ul { margin: 7px 0 0; padding-left: 24px; }
 .tour-results-games li + li { margin-top: 4px; }
 @media (max-width: 520px) { .tour-reveal-nav .btn { min-height: 46px; padding: 0 12px; font-size: 15px; } }
-@media (prefers-reduced-motion: reduce) { .tour-reveal-title { animation: none; } .tour-reveal-description, .tour-reveal-statistic, .tour-reveal-names, .tour-award-label { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .tour-reveal-slide.is-new .tour-reveal-title, .tour-reveal-slide.is-new-statistic .tour-award-label, .tour-reveal-slide.is-new-name .tour-reveal-names { animation: none; } .tour-reveal-statistic, .tour-reveal-names, .tour-award-label { transition: none; } }
 .tour-playing-layout .tour-table-groups { margin-top: 0; }
 .tour-upcoming { margin-top: 24px; }
 .tour-upcoming-title { margin: 0 0 12px; color: var(--ink-2); font-size: 18px; }
