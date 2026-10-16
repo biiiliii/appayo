@@ -206,3 +206,46 @@
 .tour-place.place-2 { background: #dfe4e8; order: 1; }
 .tour-place.place-3 { background: #e6b694; order: 3; }
 @keyframes place-in { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ---- Espectacle del sorteig: cartes amb els noms repartides sobre tapets ---- */
+.tour-stage-actions { display: flex; justify-content: center; margin-top: 14px; }
+.draw-show { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden;
+  background: radial-gradient(ellipse 90% 70% at 50% 38%, #213b2d, #15261d 62%, #0e1a13); color: #eef1e8; }
+.draw-show[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.draw-show::backdrop { background: #15261d; }
+.draw-head { padding: max(16px, env(safe-area-inset-top)) clamp(16px, 4vw, 48px) 0; }
+.draw-title { margin: 0; font-size: clamp(26px, 4vw, 46px); font-weight: 800; font-stretch: 85%; font-variation-settings: "opsz" 96; letter-spacing: -.03em; line-height: 1.05; }
+.draw-summary { margin: 6px 0 0; color: #9fbfac; font-size: clamp(15px, 1.6vw, 19px); }
+.draw-foot { display: flex; justify-content: flex-end; padding: 0 clamp(16px, 4vw, 48px) max(16px, env(safe-area-inset-bottom)); }
+.draw-show .btn.outline { border-color: #eef1e866; color: #eef1e8; }
+.draw-show .btn.outline:hover { background: #eef1e814; }
+.draw-foot .btn[hidden] { display: none; }
+.draw-close { border-color: #eef1e8; background: #eef1e8; color: var(--ink); }
+
+.draw-scene { display: grid; place-items: center; min-height: 0; perspective: 1150px; }
+.draw-floor { --h: 40px; display: grid; justify-items: center; transform-style: preserve-3d; transform-origin: 50% 70%;
+  transform: rotateX(30deg) scale(.84); transition: transform 1.5s cubic-bezier(.5, 0, .2, 1); }
+.draw-floor.is-flat { transform: none; }
+.draw-grid { display: grid; grid-template-columns: repeat(var(--columns, 1), calc(var(--h) * 6.55)); justify-content: center; gap: calc(var(--h) * .6); transform-style: preserve-3d; }
+.draw-table { padding: 0 calc(var(--h) * .25); border: calc(var(--h) * .1) solid #0f3a26; border-radius: calc(var(--h) * .45);
+  background: radial-gradient(ellipse at 50% 40%, #1d6243, #154d33 75%); box-shadow: 0 calc(var(--h) * .15) calc(var(--h) * .5) #0007; transform-style: preserve-3d; }
+.draw-table-name { margin: 0; height: calc(var(--h) * 1.4); padding-top: calc(var(--h) * .25); color: #9fbfac; font-size: calc(var(--h) * .55); font-weight: 800; font-stretch: 85%; line-height: 1.6; transition: color .4s; }
+.draw-table.is-full .draw-table-name { color: #fff; }
+.draw-table.is-full { animation: draw-table-full .5s ease; }
+@keyframes draw-table-full { 40% { border-color: #eef1e8aa; } }
+.draw-seats { display: grid; grid-template-columns: repeat(2, calc(var(--h) * 2.9)); grid-auto-rows: var(--h); gap: calc(var(--h) * .25); padding-bottom: calc(var(--h) * .25); transform-style: preserve-3d; }
+.draw-seat { position: relative; border-radius: calc(var(--h) * .12); background: #0f3a2655; transform-style: preserve-3d; }
+.draw-deck-zone { display: grid; place-items: center; height: calc(var(--h) * 2.2); transition: opacity .6s, height 1.5s cubic-bezier(.5, 0, .2, 1); transform-style: preserve-3d; }
+.draw-floor.is-flat .draw-deck-zone { height: 0; opacity: 0; }
+.draw-deck { position: relative; width: calc(var(--h) * 2.9); height: var(--h); transform-style: preserve-3d; }
+
+.draw-card { position: absolute; inset: 0; transform-style: preserve-3d; }
+.draw-card-back, .draw-card-face { position: absolute; inset: 0; display: grid; place-items: center; border-radius: calc(var(--h) * .12);
+  backface-visibility: hidden; -webkit-backface-visibility: hidden; box-shadow: 0 calc(var(--h) * .05) calc(var(--h) * .18) #0006; }
+.draw-card-back { background: repeating-linear-gradient(45deg, #ffffff12 0 2px, transparent 2px 7px), repeating-linear-gradient(-45deg, #ffffff12 0 2px, transparent 2px 7px), #1e6b47;
+  box-shadow: inset 0 0 0 calc(var(--h) * .07) #eef1e8, 0 calc(var(--h) * .05) calc(var(--h) * .18) #0006; }
+.draw-card-back .pcard { width: calc(var(--h) * .46); height: calc(var(--h) * .64); font-size: calc(var(--h) * .4); border-radius: calc(var(--h) * .06); }
+.draw-card-face { justify-items: start; padding: 0 calc(var(--h) * .2); background: #fff; color: var(--ink); transform: rotateY(180deg); }
+.draw-card-name { max-width: 100%; overflow: hidden; padding-bottom: calc(var(--h) * .04); border-bottom: 1px solid var(--rule); font-size: calc(var(--h) * .34); font-weight: 750; font-stretch: 85%; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.draw-card-face.is-long .draw-card-name { font-size: calc(var(--h) * .28); font-stretch: 78%; }
+@media (prefers-reduced-motion: reduce) { .draw-floor { transform: none; } }

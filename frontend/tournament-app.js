@@ -4,11 +4,13 @@ import { brand, navigation } from './brand.js';
 import { tournamentPaths, tournamentRoute, legacyTournamentPath, normalizedTournamentId, canonicalTournamentRoute } from './routes.js';
 import { tournamentProgress, visibleTournamentWaves, suggestedTableCount } from './tournament-progress.js';
 import { canStoreLocally } from './storage.js';
+import { playDrawShow } from './draw-show.js';
 
 const root = document.getElementById('app');
 const localStorageAvailable = canStoreLocally();
 const sessionsKey = 'appayo:tournament-sessions';
 const draftKey = id => `appayo:tournament-config:${id}`;
+const drawShowKey = id => `appayo:draw-show:${id}`;
 const localKey = token => `appayo:table:${token}`;
 const closedScoresMessage = 'Les puntuacions estan tancades perquè ja han començat els resultats.';
 const conflictMessage = 'Des d’un altre mòbil s’han desat rondes d’aquesta taula. Ara veus les del servidor: revisa-les.';
@@ -526,6 +528,7 @@ function configureForm() {
             weightUnevenTables: values.has('weightUnevenTables'),
           }) });
           sessionStorage.removeItem(draftKey(id));
+          try { sessionStorage.setItem(drawShowKey(id), '1'); } catch { /* Sense sessionStorage no surt l'espectacle. */ }
           location.assign(tournamentPaths.admin(id));
         } catch (err) {
           error.textContent = err.message;
@@ -833,6 +836,8 @@ function status(data, admin) {
   const visibleWaves = visibleTournamentWaves(data);
   const hasMultipleWaves = progress.hasMultipleWaves;
   const progressLabel = `Partida ${progress.game}/${data.games}${hasMultipleWaves ? ` — Torn ${progress.wave}/${progress.waves}` : ''} — Ronda ${progress.round}/${data.rounds}`;
+  const drawGame = Math.min(progress.game, data.schedule.length) - 1;
+  const showDraw = () => playDrawShow({ tables: data.schedule[drawGame], players: data.players, game: drawGame, games: data.games });
   const progressFill = h('span', { class: 'tour-stage-fill', style: `width: ${100 * progress.completed / progress.total}%` });
   const allTables = data.schedule.flatMap((game, gi) => game.map((seats, ti) => ({ seats, ti, gi,
     current: data.tables.find(table => table.game === gi && table.table === ti) })));
@@ -880,7 +885,10 @@ function status(data, admin) {
     h('section', { class: 'tour-stage-progress' },
       h('h2', { class: 'tour-stage-title' }, progressLabel),
       h('div', { class: `tour-stage-meter${data.phase === 'playing' ? ' is-playing' : ''}`, role: 'progressbar', 'aria-label': 'Progrés del torneig',
-        'aria-valuemin': '0', 'aria-valuemax': String(progress.total), 'aria-valuenow': String(progress.completed) }, progressFill)),
+        'aria-valuemin': '0', 'aria-valuemax': String(progress.total), 'aria-valuenow': String(progress.completed) }, progressFill),
+      !allFinished ? h('div', { class: 'tour-stage-actions' },
+        h('button', { class: 'btn outline small', type: 'button', onclick: showDraw },
+          data.games > 1 ? `Mira el sorteig de la partida ${drawGame + 1}` : 'Mira el sorteig')) : null),
     !admin && visibleTables.some(({ current }) => current.active && !current.finished && current.entryPath)
       ? h('p', { class: 'tour-spectate-instruction' }, 'Toca la teva taula per apuntar-ne els punts') : null,
     notice(),
@@ -1092,6 +1100,14 @@ function table() {
       'aria-labelledby': `tour-round-tab-${selectedTab}` }, form) : null));
 }
 
+function takeDrawShow(id) {
+  try {
+    if (!sessionStorage.getItem(drawShowKey(id))) return false;
+    sessionStorage.removeItem(drawShowKey(id));
+    return true;
+  } catch { return false; }
+}
+
 function render() {
   const titles = {
     list: 'Tornejos',
@@ -1130,6 +1146,11 @@ function render() {
   else if (state.mode === 'public_table') content = resultsTable(state.data, false);
   else content = status(state.data, state.mode === 'admin');
   root.replaceChildren(content);
+  // Just després d'iniciar el torneig, l'organitzador veu com es reparteixen les taules.
+  if (state.mode === 'admin' && state.data?.schedule?.length && takeDrawShow(state.id)) {
+    playDrawShow({ tables: state.data.schedule[0], players: state.data.players, game: 0, games: state.data.games,
+      closeLabel: 'Comença la partida' });
+  }
 }
 
 function route() {
