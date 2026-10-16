@@ -1274,9 +1274,19 @@ function render() {
   if (state.mode === 'admin' && state.data?.phase === 'seeing_pairings' && !initialDrawOpen) {
     initialDrawOpen = true;
     const id = state.id;
-    const dialog = playDrawShow({ tables: state.data.schedule[0], players: state.data.players, game: 0, games: state.data.games,
-      closeLabel: 'Comença la partida' });
-    dialog.addEventListener('close', async () => {
+    const { schedule, players } = state.data;
+    const showRound = index => {
+      const last = index === schedule.length - 1;
+      const dialog = playDrawShow({ tables: schedule[index], players, game: index, games: schedule.length,
+        title: `Sorteig · Ronda ${index + 1}/${schedule.length}`,
+        skipLabel: 'Passar animació', skipInHeader: true,
+        closeLabel: last ? 'Comença la partida' : 'Següent' });
+      dialog.addEventListener('close', () => {
+        if (!last) { showRound(index + 1); return; }
+        finishInitialDraw();
+      }, { once: true });
+    };
+    const finishInitialDraw = async () => {
       try {
         await api(`/tournaments/${id}/pairings/complete`, {
           method: 'PUT', headers: { Authorization: `Bearer ${session(id)?.token}` },
@@ -1288,7 +1298,8 @@ function render() {
         initialDrawOpen = false;
         if (state.id === id && state.mode === 'admin') render();
       }
-    }, { once: true });
+    };
+    showRound(0);
   }
 }
 

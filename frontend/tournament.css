@@ -271,13 +271,15 @@
   background: radial-gradient(ellipse 90% 70% at 50% 38%, #213b2d, #15261d 62%, #0e1a13); color: #eef1e8; }
 .draw-show[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 .draw-show::backdrop { background: #15261d; }
-.draw-head { padding: max(16px, env(safe-area-inset-top)) clamp(16px, 4vw, 48px) 0; }
+.draw-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: max(16px, env(safe-area-inset-top)) clamp(16px, 4vw, 48px) 0; }
+.draw-head > div { min-width: 0; }
+.draw-skip-top { flex: none; min-height: 40px; padding: 0 12px; border-radius: var(--r-s); font-size: 14px; white-space: nowrap; }
 .draw-title { margin: 0; font-size: clamp(26px, 4vw, 46px); font-weight: 800; font-stretch: 85%; font-variation-settings: "opsz" 96; letter-spacing: -.03em; line-height: 1.05; }
 .draw-summary { margin: 6px 0 0; color: #9fbfac; font-size: clamp(15px, 1.6vw, 19px); }
 .draw-foot { display: flex; justify-content: flex-end; padding: 0 clamp(16px, 4vw, 48px) max(16px, env(safe-area-inset-bottom)); }
 .draw-show .btn.outline { border-color: #eef1e866; color: #eef1e8; }
 .draw-show .btn.outline:hover { background: #eef1e814; }
-.draw-foot .btn[hidden] { display: none; }
+.draw-show .btn[hidden] { display: none; }
 .draw-close { border-color: #eef1e8; background: #eef1e8; color: var(--ink); }
 
 .draw-scene { display: grid; place-items: center; min-height: 0; perspective: 1150px; }

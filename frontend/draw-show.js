@@ -63,17 +63,18 @@ const jitter = spread => (Math.random() * 2 - 1) * spread;
  * Obre el sorteig a pantalla completa.
  * `tables`: per a cada taula, els índexs dels jugadors; `players`: els noms.
  */
-export function playDrawShow({ tables, players, game, games, closeLabel = 'Tanca' }) {
+export function playDrawShow({ tables, players, game, games, title: customTitle,
+  closeLabel = 'Tanca', skipLabel = 'Salta l’animació', skipInHeader = false }) {
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const order = dealOrder(tables);
   const animations = new Set();
   let skipped = false;
   let finished = false;
 
-  const title = el('h2', 'draw-title', games > 1 ? `Sorteig de la partida ${game + 1}` : 'Sorteig de les taules');
+  const title = el('h2', 'draw-title', customTitle ?? (games > 1 ? `Sorteig de la partida ${game + 1}` : 'Sorteig de les taules'));
   title.id = 'draw-title';
   const summary = el('p', 'draw-summary', `${order.length} jugadors, ${tables.length} ${tables.length === 1 ? 'taula' : 'taules'}`);
-  const skip = el('button', 'btn outline draw-skip', 'Salta l’animació');
+  const skip = el('button', `btn outline draw-skip${skipInHeader ? ' draw-skip-top' : ''}`, skipLabel);
   skip.type = 'button';
   const close = el('button', 'btn draw-close', closeLabel);
   close.type = 'button';
@@ -87,9 +88,9 @@ export function playDrawShow({ tables, players, game, games, closeLabel = 'Tanca
   const floor = el('div', 'draw-floor', grid, el('div', 'draw-deck-zone', deck));
   const scene = el('div', 'draw-scene', floor);
   const dialog = el('dialog', 'draw-show',
-    el('header', 'draw-head', el('div', '', title, summary)),
+    el('header', 'draw-head', el('div', '', title, summary), ...(skipInHeader ? [skip] : [])),
     scene,
-    el('footer', 'draw-foot', skip, close));
+    el('footer', 'draw-foot', ...(skipInHeader ? [] : [skip]), close));
   dialog.setAttribute('aria-labelledby', 'draw-title');
 
   // Les cartes: la primera que es reparteix és la de dalt de tot de la pila.
