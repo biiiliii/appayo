@@ -1,8 +1,11 @@
 // Pantalles del torneig. Les dades del sorteig i dels resultats les decideix el servidor.
-import { TOTAL, PAPAYOO_POINTS, clampPoints, resolveRound } from './logic.js';
+import { TOTAL, PAPAYOO_POINTS, clampPoints, resolveRound, standings } from './logic.js';
+import { renderChart, seriesColor } from './chart.js';
+import { symbolEl } from './symbols.js';
 import { brand, navigation } from './brand.js';
 import { tournamentPaths, tournamentRoute, legacyTournamentPath, normalizedTournamentId, canonicalTournamentRoute } from './routes.js';
 import { tournamentProgress, visibleTournamentWaves, suggestedTableCount } from './tournament-progress.js';
+import { encountersByTurn } from './tournament-results.js';
 import { canStoreLocally } from './storage.js';
 import { playDrawShow } from './draw-show.js';
 
@@ -47,7 +50,8 @@ function changeSession(id, change) {
 const organizerModes = ['admin', 'configure', 'results', 'results_table'];
 const publicModes = ['view', 'public_table'];
 const state = { data: null, mode: null, id: null, token: null, error: '', message: '', editing: null, draft: null,
-  roundDrafts: {}, nameEditing: false, nameSaving: false, finishedTablesExpanded: false };
+  roundDrafts: {}, nameEditing: false, nameSaving: false, finishedTablesExpanded: false,
+  finalTab: 'ranking', finalTabTournamentId: null };
 const directSaves = new Set();
 const failedDirectSaves = new Set();
 
@@ -798,10 +802,74 @@ function withMarks(value, { rank = null, best = false, label = '' } = {}) {
     best ? badge('màx.', label, 'max') : null);
 }
 
+function encounterReport(result) {
+  const { players, rounds } = result;
+  const rows = standings(players, rounds);
+  const totals = rows.slice().sort((a, b) => a.index - b.index).map(row => row.total);
+  return h('div', { class: 'tour-encounter-report' },
+    h('div', { class: 'tour-encounter-overview' },
+      h('div', { class: 'tour-encounter-standing' },
+        h('h4', {}, 'Resultat de la taula'),
+        h('p', { class: 'tour-encounter-note' }, 'Menys punts guanya'),
+        h('ol', {}, rows.map(row => h('li', { class: row.rank === 1 ? 'first' : '' },
+          h('span', { class: 'tour-encounter-player' },
+            h('span', { class: 'tour-encounter-rank' }, `${row.rank}.`),
+            symbolEl(row.index, seriesColor(row.index), 18), row.name),
+          h('strong', {}, `${row.total} punts`))))),
+      h('div', { class: 'tour-encounter-graph' },
+        h('h4', {}, 'Evolució dels punts'), renderChart(players, rounds),
+        h('ul', { class: 'tour-encounter-legend', 'aria-label': 'Llegenda de la gràfica' },
+          players.map((name, index) => h('li', {}, symbolEl(index, seriesColor(index), 16), name))))),
+    h('div', { class: 'tour-encounter-rounds' },
+      h('h4', {}, 'Ronda a ronda'),
+      h('div', { class: 'tour-encounter-scroll' },
+        h('table', { class: 'rounds' },
+          h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, 'Ronda'),
+            players.map(name => h('th', { scope: 'col' }, name)))),
+          h('tbody', {}, rounds.map((round, index) => h('tr', {},
+            h('th', { scope: 'row' }, index + 1), round.points.map((points, player) =>
+              h('td', { class: round.papayoo === player ? 'pap' : '' }, points,
+                round.papayoo === player ? h('span', { class: 'pcard', 'aria-label': 'Papayoo' }, '7') : null))))),
+          h('tfoot', {}, h('tr', {}, h('th', { scope: 'row' }, 'Total'),
+            totals.map(total => h('td', {}, total))))))));
+}
+
+function encounterList(data) {
+  const games = encountersByTurn(data);
+  const showTurns = games.some(({ waves }) => waves.length > 1);
+  const card = table => {
+    const result = table.result;
+    const rows = result ? standings(result.players, result.rounds) : [];
+    const winner = rows.filter(row => row.rank === 1);
+    const details = h('details', { class: 'tour-encounter' },
+      h('summary', {},
+        h('span', { class: 'tour-encounter-summary-title' }, `Taula ${table.table + 1}`),
+        h('span', { class: 'tour-encounter-summary-players' }, result ? join(result.players) : 'Resultat pendent'),
+        result ? h('span', { class: 'tour-encounter-summary-winner' },
+          `${winner.length > 1 ? 'Empat' : 'Menys punts'}: ${join(winner.map(row => row.name))} · ${rows[0].total} punts`) : null));
+    details.addEventListener('toggle', () => {
+      if (details.open && !details.dataset.loaded) {
+        details.dataset.loaded = 'true';
+        details.append(result ? encounterReport(result) : h('p', {}, 'Encara no hi ha resultat per a aquesta taula.'));
+      }
+    });
+    return details;
+  };
+  return h('div', { class: 'tour-encounters' }, games.map(({ game, waves }) =>
+    h('section', { class: 'tour-encounter-game' }, h('h2', {}, `Partida ${game + 1}`),
+      waves.map(({ wave, tables }) => h('div', { class: 'tour-encounter-wave' },
+        showTurns ? h('h3', {}, `Torn ${wave + 1}`) : null,
+        h('div', { class: 'tour-encounter-list' }, tables.map(card)))))));
+}
+
 function resultsTable(data, admin) {
   if (!data.standings) return h('div', {}, spectateHeader(data),
     h('section', { class: 'tour-waiting' }, h('h2', {}, 'La classificació encara no és pública'),
       h('p', {}, 'Quan l’organitzador la mostri, la veuràs aquí.')));
+  if (state.finalTabTournamentId !== data.id) {
+    state.finalTabTournamentId = data.id;
+    state.finalTab = 'ranking';
+  }
   const rows = data.standings.filter(row => row.played);
   const best = {
     highestTotal: Math.max(...rows.map(row => row.total)),
@@ -846,10 +914,41 @@ function resultsTable(data, admin) {
       toggle();
     } }, name, points), detail];
   }));
+  const selectTab = tab => {
+    if (state.finalTab === tab) return;
+    state.finalTab = tab;
+    render();
+    document.getElementById(`tour-final-tab-${tab}`)?.focus();
+  };
+  const tab = (key, label) => h('button', {
+    id: `tour-final-tab-${key}`, type: 'button', role: 'tab',
+    'aria-selected': String(state.finalTab === key), 'aria-controls': `tour-final-panel-${key}`,
+    tabindex: state.finalTab === key ? '0' : '-1',
+    onclick: () => selectTab(key),
+    onkeydown: event => {
+      const next = event.key === 'ArrowRight' ? (key === 'ranking' ? 'encounters' : 'ranking')
+        : event.key === 'ArrowLeft' ? (key === 'ranking' ? 'encounters' : 'ranking')
+          : event.key === 'Home' ? 'ranking' : event.key === 'End' ? 'encounters' : null;
+      if (!next) return;
+      event.preventDefault();
+      event.stopPropagation();
+      selectTab(next);
+    },
+  }, label);
+  const ranking = h('div', { id: 'tour-final-panel-ranking', role: 'tabpanel',
+    'aria-labelledby': 'tour-final-tab-ranking', ...(state.finalTab === 'ranking' ? {} : { hidden: '' }) },
+    admin ? null : h('p', { class: 'tour-final-hint' }, 'Toca un nom per veure’n més detalls.'),
+    h('div', { class: 'tour-results' }, h('table', {}, header, body)));
+  const encounters = h('div', { id: 'tour-final-panel-encounters', role: 'tabpanel',
+    'aria-labelledby': 'tour-final-tab-encounters', ...(state.finalTab === 'encounters' ? {} : { hidden: '' }) },
+    state.finalTab === 'encounters' ? encounterList(data) : null);
   return h('div', { class: 'tour-final-page' }, admin ? tournamentHeader(data, false) : spectateHeader(data),
-    notice(), h('section', { class: 'tour-final-content' }, h('h1', {}, 'Classificació final'),
-      admin ? null : h('p', { class: 'tour-final-hint' }, 'Toca un jugador per veure’n més detalls.'),
-      h('div', { class: 'tour-results' }, h('table', {}, header, body))),
+    notice(), h('section', { class: 'tour-final-content' },
+      h('div', { class: 'tour-final-heading' },
+        h('h1', {}, 'Classificació final'),
+        h('div', { class: 'tour-final-tabs', role: 'tablist', 'aria-label': 'Vistes dels resultats' },
+          tab('ranking', 'Classificació'), tab('encounters', 'Resultats per enfrontaments'))),
+      ranking, encounters),
     admin ? revealNavigation(9) : null);
 }
 
@@ -1155,7 +1254,7 @@ function render() {
     missing: 'Pàgina no trobada',
   };
   document.title = `${titles[state.mode] ?? 'Tornejos'} | APPayoo`;
-  root.classList.toggle('tour-desktop', organizerModes.includes(state.mode));
+  root.classList.toggle('tour-desktop', organizerModes.includes(state.mode) || state.mode === 'public_table');
   let content;
   if (!localStorageAvailable && (state.mode === 'new' || organizerModes.includes(state.mode)))
     content = h('div', {}, header(tournamentPaths.list), section('Obre APPayoo al navegador',
@@ -1200,7 +1299,7 @@ window.addEventListener('hashchange', route);
 window.addEventListener('popstate', route);
 window.addEventListener('keydown', event => {
   if (!['Enter', 'ArrowRight', 'ArrowLeft'].includes(event.key)
-      || !['results', 'results_table'].includes(state.mode) || !state.data
+      || state.mode !== 'results' || !state.data
       || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
       || event.target.closest?.('input, textarea, select, [contenteditable="true"]')
       || (event.key === 'Enter' && event.target.closest?.('button, a'))) return;
