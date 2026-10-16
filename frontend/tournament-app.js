@@ -13,7 +13,6 @@ const root = document.getElementById('app');
 const localStorageAvailable = canStoreLocally();
 const sessionsKey = 'appayo:tournament-sessions';
 const draftKey = id => `appayo:tournament-config:${id}`;
-const drawShowKey = id => `appayo:draw-show:${id}`;
 const localKey = token => `appayo:table:${token}`;
 const closedScoresMessage = 'Les puntuacions estan tancades perquè ja han començat els resultats.';
 const conflictMessage = 'Des d’un altre mòbil s’han desat rondes d’aquesta taula. Ara veus les del servidor: revisa-les.';
@@ -532,7 +531,6 @@ function configureForm() {
             weightUnevenTables: values.has('weightUnevenTables'),
           }) });
           sessionStorage.removeItem(draftKey(id));
-          try { sessionStorage.setItem(drawShowKey(id), '1'); } catch { /* Sense sessionStorage no surt l'espectacle. */ }
           location.assign(tournamentPaths.admin(id));
         } catch (err) {
           error.textContent = err.message;
@@ -953,10 +951,11 @@ function resultsTable(data, admin) {
 }
 
 function status(data, admin) {
-  if (data.phase === 'configuring') return h('div', {}, spectateHeader(data),
+  if (data.phase === 'configuring' || data.phase === 'seeing_pairings') return h('div', {}, spectateHeader(data),
     h('section', { class: 'tour-waiting' },
-      h('h2', {}, 'El torneig s’està configurant'),
-      h('p', {}, 'Quan l’organitzador iniciï el torneig veuràs aquí l’estat de les partides.')));
+      h('h2', {}, admin && data.phase === 'seeing_pairings' ? 'Preparant les taules' : 'El torneig s’està configurant'),
+      h('p', {}, admin && data.phase === 'seeing_pairings' ? 'El progrés apareixerà quan tanquis el sorteig.'
+        : 'Quan l’organitzador iniciï el torneig veuràs aquí l’estat de les partides.')));
   if (!admin && data.progress.received === data.progress.total && !data.revealed)
     return h('div', {}, spectateHeader(data),
       h('section', { class: 'tour-waiting' },
@@ -1231,13 +1230,7 @@ function table() {
       'aria-labelledby': `tour-round-tab-${selectedTab}` }, form) : null));
 }
 
-function takeDrawShow(id) {
-  try {
-    if (!sessionStorage.getItem(drawShowKey(id))) return false;
-    sessionStorage.removeItem(drawShowKey(id));
-    return true;
-  } catch { return false; }
-}
+let initialDrawOpen = false;
 
 function render() {
   const titles = {
@@ -1278,9 +1271,24 @@ function render() {
   else content = status(state.data, state.mode === 'admin');
   root.replaceChildren(content);
   // Just després d'iniciar el torneig, l'organitzador veu com es reparteixen les taules.
-  if (state.mode === 'admin' && state.data?.schedule?.length && takeDrawShow(state.id)) {
-    playDrawShow({ tables: state.data.schedule[0], players: state.data.players, game: 0, games: state.data.games,
+  if (state.mode === 'admin' && state.data?.phase === 'seeing_pairings' && !initialDrawOpen) {
+    initialDrawOpen = true;
+    const id = state.id;
+    const dialog = playDrawShow({ tables: state.data.schedule[0], players: state.data.players, game: 0, games: state.data.games,
       closeLabel: 'Comença la partida' });
+    dialog.addEventListener('close', async () => {
+      try {
+        await api(`/tournaments/${id}/pairings/complete`, {
+          method: 'PUT', headers: { Authorization: `Bearer ${session(id)?.token}` },
+        });
+        await refresh();
+      } catch (err) {
+        window.alert(`${err.message} Torna a tancar el sorteig per continuar.`);
+      } finally {
+        initialDrawOpen = false;
+        if (state.id === id && state.mode === 'admin') render();
+      }
+    }, { once: true });
   }
 }
 

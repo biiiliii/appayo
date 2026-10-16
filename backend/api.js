@@ -82,8 +82,8 @@ async function rowsFor(conn, id) {
 
 function snapshot(row, tableRows, { includeSecrets = false, includeScores = false } = {}) {
   const t = JSON.parse(row.data);
-  if (t.phase === 'configuring') return {
-    id: t.id, name: t.name, createdAt: t.createdAt, phase: 'configuring',
+  if (t.phase === 'configuring' || (t.phase === 'seeing_pairings' && !includeSecrets)) return {
+    id: t.id, name: t.name, createdAt: t.createdAt, phase: t.phase,
   };
   const results = {};
   const tables = tableRows.map(item => {
@@ -111,7 +111,7 @@ function snapshot(row, tableRows, { includeSecrets = false, includeScores = fals
     simultaneousTables: t.simultaneousTables ?? Math.max(...t.schedule.map(game => game.length)),
     weightUnevenTables: t.weightUnevenTables !== false,
     currentWave,
-    phase: visibleRevealStep > 0 ? 'results_shown' : 'playing',
+    phase: visibleRevealStep > 0 ? 'results_shown' : t.phase,
     revealed: visibleRevealStep > 0, revealStep: visibleRevealStep, tables,
     progress: progress({ ...t, results }),
   };
@@ -202,7 +202,7 @@ async function configure(conn, id, body) {
     });
     t.id = id;
     t.createdAt = draft.createdAt;
-    t.phase = 'playing';
+    t.phase = 'seeing_pairings';
     t.links = t.schedule.map(game => game.map(() => token()));
     for (let gi = 0; gi < t.schedule.length; gi++) {
       for (let ti = 0; ti < t.schedule[gi].length; ti++) {
@@ -226,6 +226,20 @@ async function renameTournament(conn, id, body) {
     data.name = name;
     await tx.query('UPDATE tournaments SET name = ?, data = ? WHERE id = ?', [name, JSON.stringify(data), id]);
     return reply({ id, name });
+  });
+}
+
+async function finishPairings(conn, id) {
+  return conn.transaction(async tx => {
+    await tx.query('UPDATE tournaments SET name = name WHERE id = ?', [id]);
+    const row = await tournament(tx, id);
+    if (!row) return error('Aquest torneig no existeix.', 404);
+    const data = JSON.parse(row.data);
+    if (data.phase === 'playing') return reply({ phase: 'playing' });
+    if (data.phase !== 'seeing_pairings') return error('El sorteig encara no es pot tancar.', 409);
+    data.phase = 'playing';
+    await tx.query('UPDATE tournaments SET data = ? WHERE id = ?', [JSON.stringify(data), id]);
+    return reply({ phase: 'playing' });
   });
 }
 
@@ -298,6 +312,8 @@ export async function handleApi(request, route = new URL(request.url).pathname) 
         return await configure(conn, id, await readBody(request));
       if (request.method === 'PUT' && parts[2] === 'name' && parts.length === 3)
         return await renameTournament(conn, id, await readBody(request));
+      if (request.method === 'PUT' && parts[2] === 'pairings' && parts[3] === 'complete' && parts.length === 4)
+        return await finishPairings(conn, id);
       if (request.method === 'GET' && parts.length === 2)
         return reply(snapshot(row, await rowsFor(conn, id), { includeSecrets: true, includeScores: Number(row.revealed) >= 2 }));
       if (JSON.parse(row.data).phase === 'configuring') return error('Primer cal configurar el torneig.', 409);
@@ -307,6 +323,8 @@ export async function handleApi(request, route = new URL(request.url).pathname) 
         const blocked = await conn.transaction(async tx => {
           // El mateix bloqueig de fila s'utilitza en desar rondes: cap correcció pot travessar l'inici dels resultats.
           const locked = (await tx.query('UPDATE tournaments SET revealed = revealed WHERE id = ? RETURNING *', [id]))[0];
+          if (JSON.parse(locked.data).phase === 'seeing_pairings')
+            return { message: 'Primer cal acabar de veure el sorteig.', status: 409 };
           if (body.step === 0 && Number(locked.revealed) > 0)
             return { message: 'Els resultats ja han començat i no es poden reobrir les puntuacions.', status: 409 };
           if (body.step > 0) {

@@ -39,16 +39,27 @@ test('el torneig neix en configuració i conserva el codi en preparar les partid
   assert.equal(pending.data.name, 'Primavera');
   assert.equal('schedule' in pending.data, false);
   assert.equal((await call(`/tournaments/${id}/status`)).data.phase, 'configuring');
+  assert.equal((await call(`/tournaments/${id}/pairings/complete`, 'PUT', undefined, token)).status, 409);
   assert.equal((await call(`/tournaments/${id}/configure`, 'PUT', { players: ['Anna', 'Biel', 'Carla'], games: 2, rounds: 3 })).status, 401);
   assert.equal((await call(`/tournaments/${id}/configure`, 'PUT', { players: ['Anna'], games: 2, rounds: 3 }, token)).status, 400);
   assert.equal((await call(`/tournaments/${id}/configure`, 'PUT', { players: ['Anna', 'Biel', 'Carla'], games: 2, rounds: 3 }, token)).status, 200);
   const ready = await call(`/tournaments/${id}`, 'GET', undefined, token);
-  assert.equal(ready.data.phase, 'playing');
+  assert.equal(ready.data.phase, 'seeing_pairings');
   assert.equal(ready.data.schedule.length, 2);
   const table = (await call(`/tables/${ready.data.links[0][0]}`)).data;
   assert.equal(table.tournamentId, id);
   assert.deepEqual(table.players, ready.data.schedule[0][0].map(index => ready.data.players[index]));
-  assert.deepEqual((await call(`/tournaments/${id}/status`)).data.schedule, ready.data.schedule);
+  const duringDraw = (await call(`/tournaments/${id}/status`)).data;
+  assert.equal(duringDraw.phase, 'seeing_pairings');
+  assert.equal('schedule' in duringDraw, false);
+  assert.equal('tables' in duringDraw, false);
+  assert.equal('links' in duringDraw, false);
+  assert.equal((await call(`/tournaments/${id}/pairings/complete`, 'PUT')).status, 401);
+  assert.equal((await call(`/tournaments/${id}/pairings/complete`, 'PUT', undefined, token)).status, 200);
+  assert.equal((await call(`/tournaments/${id}/pairings/complete`, 'PUT', undefined, token)).status, 200);
+  const playing = (await call(`/tournaments/${id}/status`)).data;
+  assert.equal(playing.phase, 'playing');
+  assert.deepEqual(playing.schedule, ready.data.schedule);
   assert.equal((await call(`/tournaments/${id}/configure`, 'PUT', { players: ['Anna', 'Biel', 'Carla'], games: 1, rounds: 1 }, token)).status, 409);
 });
 
@@ -104,6 +115,7 @@ test('les taules només poden enviar rondes durant el seu torn', async () => {
   assert.deepEqual(admin.currentWave, { game: 0, wave: 0 });
   assert.deepEqual(admin.tables.map(t => [t.game, t.table, t.wave, t.active]),
     [[0, 0, 0, true], [0, 1, 1, false], [1, 0, 0, false], [1, 1, 1, false]]);
+  assert.equal((await call(`/tournaments/${id}/pairings/complete`, 'PUT', undefined, token)).status, 200);
   const publicStatus = (await call(`/tournaments/${id}/status`)).data;
   assert.equal(publicStatus.tables[0].entryPath, `/tournaments/table/${admin.links[0][0]}`);
   assert.equal('entryPath' in publicStatus.tables[1], false);
@@ -133,6 +145,7 @@ test('una taula acabada es pot reobrir per corregir una ronda fins que comencen 
     simultaneousTables: 2 };
   assert.equal((await call(`/tournaments/${id}/configure`, 'PUT', config, token)).status, 200);
   const admin = (await call(`/tournaments/${id}`, 'GET', undefined, token)).data;
+  assert.equal((await call(`/tournaments/${id}/pairings/complete`, 'PUT', undefined, token)).status, 200);
   const rounds = [{ papayoo: 0, points: [100, 50, 50, 50, 0] }];
   assert.equal((await call(`/tables/${admin.links[0][0]}/rounds`, 'PUT', { rounds })).status, 200);
   const publicStatus = (await call(`/tournaments/${id}/status`)).data;
@@ -282,6 +295,8 @@ test('el torneig queda guardat i la classificació no surt abans de revelar-la',
   const tableToken = admin.data.links[0][0];
   const tablePlayers = (await call(`/tables/${tableToken}`)).data.players;
   assert.equal(tablePlayers.length, 4);
+  assert.equal((await call(`/tournaments/${id}/reveal`, 'PUT', { step: 1 }, token)).status, 409);
+  assert.equal((await call(`/tournaments/${id}/pairings/complete`, 'PUT', undefined, token)).status, 200);
   assert.equal((await call(`/tournaments/${id}/reveal`, 'PUT', { step: 1 }, token)).status, 400);
   assert.equal((await call(`/tables/${tableToken}/rounds`, 'PUT', { rounds: [{ papayoo: 0, points: [1, 2, 3, 4] }] })).status, 400);
   assert.equal((await call(`/tables/${tableToken}/rounds`, 'PUT', { rounds: [{ papayoo: 0, points: [0, 250, 0, 0] }] })).status, 400);
