@@ -53,6 +53,19 @@ const state = { data: null, mode: null, id: null, token: null, error: '', messag
   finalTab: 'ranking', finalTabTournamentId: null };
 const directSaves = new Set();
 const failedDirectSaves = new Set();
+const roundTabsObserver = typeof ResizeObserver === 'undefined' ? null
+  : new ResizeObserver(updateRoundTabLabels);
+
+function updateRoundTabLabels() {
+  const tablist = root.querySelector('.tour-round-tabs');
+  if (!tablist || !tablist.clientWidth) return;
+  const buttons = [...tablist.querySelectorAll('button')];
+  tablist.classList.remove('is-compact');
+  buttons.forEach((button, index) => { button.textContent = `Ronda ${index + 1}`; });
+  if (tablist.scrollWidth <= tablist.clientWidth) return;
+  tablist.classList.add('is-compact');
+  buttons.forEach((button, index) => { button.textContent = `R${index + 1}`; });
+}
 
 function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -72,11 +85,12 @@ const tournamentIntro = 'Els tornejos permeten encreuar jugadors en diverses par
 function header(backHref = null) { return h('div', {}, h('header', { class: `masthead${backHref ? ' with-action' : ''}` },
   h('h1', { class: 'wordmark' }, h('a', { href: '/', 'aria-label': 'APPayo · Inici' }, brand())),
   backHref ? h('a', { class: 'crumb', href: backHref }, '← Torna') : null), navigation('tournament')); }
-function spectateHeader(data) {
+function spectateHeader(data, backHref = null) {
   return h('div', {},
     h('header', { class: 'tour-spectate-header' },
       h('h1', { class: 'wordmark' }, h('a', { href: '/', 'aria-label': 'APPayo · Inici' }, brand())),
-      h('a', { class: 'tour-spectate-back', href: '/' }, '← Tornar a l’inici')),
+      h('a', { class: 'tour-spectate-back', href: backHref ?? '/' },
+        backHref ? '← Tornar al torneig' : '← Tornar a l’inici')),
     data?.name ? h('h2', { class: 'tour-spectate-name' }, data.name) : null);
 }
 function pencilIcon() {
@@ -1032,6 +1046,8 @@ function emptyDraft(size) { return { papayoo: null, points: Array(size).fill(nul
 function table() {
   const t = state.data;
   const fromAdmin = new URLSearchParams(location.search).get('from') === 'admin';
+  const tournamentHref = fromAdmin ? tournamentPaths.admin(t.tournamentId)
+    : tournamentPaths.spectate(t.tournamentId);
   const locked = Boolean(t.revealed);
   const count = t.rounds.length;
   const done = count >= t.roundsPlanned;
@@ -1057,6 +1073,7 @@ function table() {
   const selectedTab = waiting ? -1 : state.editing === null ? count : state.editing;
   const tablist = h('div', { class: 'tour-round-tabs', role: 'tablist', 'aria-label': 'Rondes de la taula' },
     tabs.map(index => h('button', { id: `tour-round-tab-${index}`, type: 'button', role: 'tab',
+      'aria-label': `Ronda ${index + 1}`,
       'aria-selected': String(index === selectedTab),
       ...(!waiting ? { 'aria-controls': 'tour-round-panel' } : {}),
       tabindex: index === selectedTab ? '0' : '-1',
@@ -1210,13 +1227,10 @@ function table() {
         } })])),
     tally, validation, submit);
   updateRoundForm();
-  return h('div', {}, spectateHeader({ name: t.tournamentName || 'Torneig de Papayoo' }),
+  return h('div', {}, spectateHeader({ name: t.tournamentName || 'Torneig de Papayoo' }, tournamentHref),
     h('div', { class: 'tour-table-heading' },
       h('p', { class: 'tour-table-context' }, `Partida ${t.game + 1}${t.waves > 1 ? ` — Torn ${t.wave + 1}` : ''} — Taula ${t.table + 1}`),
-      h('p', { class: 'tour-table-rounds' }, `${count} de ${t.roundsPlanned} rondes desades.`),
-      done || locked || fromAdmin ? h('a', { class: 'btn outline tour-table-return',
-        href: fromAdmin ? tournamentPaths.admin(t.tournamentId) : tournamentPaths.spectate(t.tournamentId) },
-        'Tornar al llistat de taules') : null),
+      h('p', { class: 'tour-table-rounds' }, `${count} de ${t.roundsPlanned} rondes desades.`)),
     notice(), !localStorageAvailable && !locked ? h('p', { class: 'note' },
       'Aquest navegador no pot desar rondes al dispositiu. Cal connexió per desar-les al torneig.') : null,
     locked ? h('p', { class: 'tour-ok', role: 'status' }, closedScoresMessage) : null,
@@ -1270,6 +1284,12 @@ function render() {
   else if (state.mode === 'public_table') content = resultsTable(state.data, false);
   else content = status(state.data, state.mode === 'admin');
   root.replaceChildren(content);
+  roundTabsObserver?.disconnect();
+  const roundTablist = root.querySelector('.tour-round-tabs');
+  if (roundTablist) {
+    updateRoundTabLabels();
+    roundTabsObserver?.observe(roundTablist);
+  }
   // Just després d'iniciar el torneig, l'organitzador veu com es reparteixen les taules.
   if (state.mode === 'admin' && state.data?.phase === 'seeing_pairings' && !initialDrawOpen) {
     initialDrawOpen = true;
@@ -1315,6 +1335,7 @@ function route() {
 
 window.addEventListener('hashchange', route);
 window.addEventListener('popstate', route);
+window.addEventListener('resize', updateRoundTabLabels);
 window.addEventListener('keydown', event => {
   if (!['Enter', 'ArrowRight', 'ArrowLeft'].includes(event.key)
       || state.mode !== 'results' || !state.data

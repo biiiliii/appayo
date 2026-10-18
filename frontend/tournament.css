@@ -14,7 +14,6 @@
 .tour-table-players p { margin: 0; }
 .tour-table-context { margin: 0; font-size: clamp(18px, 2.5vw, 23px); font-weight: 700; }
 .tour-table-rounds { margin: 8px 0 0; color: var(--ink-2); }
-.tour-table-return { margin-top: 16px; text-decoration: none; }
 .tour-stage-progress { container-type: inline-size; padding: 26px 0 22px; border-bottom: 1px solid var(--rule); }
 .tour-stage-heading { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 6px; }
 .tour-stage-heading.is-spectate { margin-bottom: 14px; }
@@ -250,6 +249,7 @@
 .tour-points-divider { width: 100%; margin: 5px 0; border: 0; border-top: 1px solid var(--rule); }
 .tour-round-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 2px solid var(--rule-strong); }
 .tour-round-tabs button { flex: none; min-width: 96px; padding: 11px 16px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--ink-2); font: inherit; font-weight: 700; cursor: pointer; }
+.tour-round-tabs.is-compact button { min-width: 48px; padding-inline: 12px; }
 .tour-round-tabs button:not(:disabled):hover { background: var(--green-tint); color: var(--green-deep); }
 .tour-round-tabs button[aria-selected="true"] { border-bottom-color: var(--green-deep); color: var(--green-deep); }
 .tour-round-tabs button:disabled { opacity: .45; cursor: not-allowed; }
