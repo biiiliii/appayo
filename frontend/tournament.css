@@ -14,6 +14,11 @@
 .tour-table-players p { margin: 0; }
 .tour-table-context { margin: 0; font-size: clamp(18px, 2.5vw, 23px); font-weight: 700; }
 .tour-table-rounds { margin: 8px 0 0; color: var(--ink-2); }
+.tour-save-indicator { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 8px 0 0; color: var(--ink-2); font-size: 14px; }
+.tour-save-indicator[hidden] { display: none; }
+.tour-save-spinner { width: 16px; height: 16px; border: 2px solid var(--rule-strong); border-top-color: var(--green-deep); border-radius: 50%; animation: tour-save-spin .8s linear infinite; }
+@keyframes tour-save-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tour-save-spinner { animation: none; } }
 .tour-stage-progress { container-type: inline-size; padding: 26px 0 22px; border-bottom: 1px solid var(--rule); }
 .tour-stage-heading { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 6px; }
 .tour-stage-heading.is-spectate { margin-bottom: 14px; }

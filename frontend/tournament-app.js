@@ -288,6 +288,9 @@ async function refresh() {
     } else if (state.mode === 'table') {
       const remote = await api(`/tables/${state.token}`);
       if (!sameRoute()) return;
+      // Una consulta iniciada abans del PUT pot arribar després i contenir una versió antiga.
+      if (!localStorageAvailable && (directSaves.has(state.token) || failedDirectSaves.has(state.token)
+        || (state.data && remote.version < state.data.version))) return;
       const local = stored(localKey(state.token), null);
       const pending = Boolean(local?.dirty) && !remote.revealed;
       // Una resposta que va sortir abans d'un desament ja confirmat és antiga: es conserven les rondes locals.
@@ -358,6 +361,10 @@ function updateTableNotice() {
 
 // Envia les rondes amb la versió del servidor en què es basen (`base`). Si un altre mòbil ha desat abans, mana el servidor.
 const syncTasks = new Map();
+function updateSaveIndicator() {
+  const indicator = root.querySelector('.tour-save-indicator');
+  if (indicator) indicator.hidden = !syncTasks.has(state.token) && !directSaves.has(state.token);
+}
 function syncRounds() {
   if (!localStorageAvailable) return Promise.resolve();
   const tableToken = state.token;
@@ -429,7 +436,8 @@ function syncRounds() {
     }
   })();
   syncTasks.set(tableToken, task);
-  task.finally(() => syncTasks.delete(tableToken));
+  updateSaveIndicator();
+  task.finally(() => { syncTasks.delete(tableToken); updateSaveIndicator(); });
   return task;
 }
 
@@ -1068,6 +1076,16 @@ function table() {
     state.message = '';
     render();
   }
+  function showRoundAfterSave(savedIndex, rounds) {
+    delete state.roundDrafts[draftKey(savedIndex)];
+    const nextIndex = savedIndex === null ? rounds.length : savedIndex + 1;
+    state.editing = nextIndex >= t.roundsPlanned ? (savedIndex ?? rounds.length - 1)
+      : nextIndex === rounds.length ? null : nextIndex;
+    state.draft = state.roundDrafts[draftKey(state.editing)] ?? draftFor(state.editing);
+    state.message = ''; state.error = '';
+    render();
+    document.getElementById(`tour-round-tab-${state.editing ?? rounds.length}`)?.focus();
+  }
   const tabs = Array.from({ length: t.roundsPlanned }, (_, index) => index);
   const enabledTabs = tabs.filter(index => !waiting && index <= count);
   const selectedTab = waiting ? -1 : state.editing === null ? count : state.editing;
@@ -1156,6 +1174,7 @@ function table() {
       const tableToken = state.token;
       if (directSaves.has(tableToken)) return;
       directSaves.add(tableToken);
+      updateSaveIndicator();
       submit.disabled = true;
       submit.textContent = 'Desant…';
       try {
@@ -1165,14 +1184,7 @@ function table() {
         if (state.mode !== 'table' || state.token !== tableToken) return;
         t.rounds = rounds;
         t.version = result.version;
-        delete state.roundDrafts[draftKey(savedIndex)];
-        const nextIndex = savedIndex === null ? rounds.length : savedIndex + 1;
-        state.editing = nextIndex >= t.roundsPlanned ? (savedIndex ?? rounds.length - 1)
-          : nextIndex === rounds.length ? null : nextIndex;
-        state.draft = state.roundDrafts[draftKey(state.editing)] ?? draftFor(state.editing);
-        state.message = ''; state.error = '';
-        render();
-        document.getElementById(`tour-round-tab-${state.editing ?? rounds.length}`)?.focus();
+        showRoundAfterSave(savedIndex, rounds);
         toast('Ronda desada');
       } catch (err) {
         if (state.mode !== 'table' || state.token !== tableToken) return;
@@ -1196,7 +1208,7 @@ function table() {
           submit.disabled = false;
           submit.textContent = 'Torna a provar';
         }
-      } finally { directSaves.delete(tableToken); }
+      } finally { directSaves.delete(tableToken); updateSaveIndicator(); }
       return;
     }
     t.rounds = rounds;
@@ -1205,16 +1217,10 @@ function table() {
       ...old, table: old?.table ?? { ...t, rounds: [] }, rounds,
       dirty: true, version: (old?.version ?? 0) + 1, base: old?.base ?? t.version,
     }));
-    delete state.roundDrafts[draftKey(savedIndex)];
-    const nextIndex = savedIndex === null ? rounds.length : savedIndex + 1;
-    state.editing = nextIndex >= t.roundsPlanned ? (savedIndex ?? rounds.length - 1)
-      : nextIndex === rounds.length ? null : nextIndex;
-    state.draft = state.roundDrafts[draftKey(state.editing)] ?? draftFor(state.editing);
-    state.message = ''; state.error = '';
-    render();
-    document.getElementById(`tour-round-tab-${state.editing ?? rounds.length}`)?.focus();
+    const syncing = syncRounds();
+    showRoundAfterSave(savedIndex, rounds);
     // syncRounds actualitza l'avís o, si hi ha conflicte, torna a dibuixar la taula.
-    await syncRounds();
+    await syncing;
   } },
     h('label', { class: 'tour-papayoo-label' }, h('span', {}, 'Qui s’ha endut el Papayoo?'),
       papayooSelect),
@@ -1230,7 +1236,10 @@ function table() {
   return h('div', {}, spectateHeader({ name: t.tournamentName || 'Torneig de Papayoo' }, tournamentHref),
     h('div', { class: 'tour-table-heading' },
       h('p', { class: 'tour-table-context' }, `Partida ${t.game + 1}${t.waves > 1 ? ` — Torn ${t.wave + 1}` : ''} — Taula ${t.table + 1}`),
-      h('p', { class: 'tour-table-rounds' }, `${count} de ${t.roundsPlanned} rondes desades.`)),
+      h('p', { class: 'tour-table-rounds' }, `${count} de ${t.roundsPlanned} rondes desades.`),
+      h('p', { class: 'tour-save-indicator', role: 'status',
+        ...(syncTasks.has(state.token) || directSaves.has(state.token) ? {} : { hidden: '' }) },
+        h('span', { class: 'tour-save-spinner', 'aria-hidden': 'true' }), ' Enviant la ronda…')),
     notice(), !localStorageAvailable && !locked ? h('p', { class: 'note' },
       'Aquest navegador no pot desar rondes al dispositiu. Cal connexió per desar-les al torneig.') : null,
     locked ? h('p', { class: 'tour-ok', role: 'status' }, closedScoresMessage) : null,
